@@ -2157,7 +2157,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v97';
+const APP_VERSION='v98';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -3717,8 +3717,11 @@ function taskCard(t){
   const filhos=childrenOf(t.id);
   const ehChecklist=filhos.length>0;
   const concluidos=filhos.filter(f=>f.status==='Concluída').length;
+  const linkBtn=t.link?`<a href="${esc(t.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Abrir link: ${esc(t.link)}" style="text-decoration:none;color:#1f6f5c;font-weight:600">🔗</a>`:'';
+  const origemLine=t.origem?`<div style="font-size:11px;color:var(--ink-soft);font-style:italic;margin-top:2px">de: ${esc(t.origem)}</div>`:'';
   return `<div class="task-card" data-task="${t.id}">
-    <div class="tc-title">${ehChecklist?'☑ ':''}${esc(t.titulo||'')}</div>
+    <div class="tc-title">${ehChecklist?'☑ ':''}${esc(t.titulo||'')} ${linkBtn}</div>
+    ${origemLine}
     <div class="tc-meta">
       <span class="pr-badge pr-${esc(t.prioridade||'Média')}">${esc(t.prioridade||'Média')}</span>
       ${t.responsavel?`<span>${esc(t.responsavel)}</span>`:''}
@@ -7547,6 +7550,14 @@ function openTaskModal(taskId){
     <label>Descrição</label>
     <textarea id="tm-desc" ${ehAdmin?'':'disabled'} placeholder="Detalhes da tarefa">${esc(t?t.descricao:'')}</textarea>
     <div class="row2">
+      <div><label>Origem <span style="font-weight:400;color:var(--ink-soft);text-transform:none;letter-spacing:0">(quem passou / de onde veio)</span></label>
+        <input id="tm-origem" value="${esc(t?t.origem||'':'')}" ${ehAdmin?'':'disabled'} placeholder="Ex.: Cliente Fulano, Maria - contabilidade, WhatsApp do gerente">
+      </div>
+      <div><label>Link <span style="font-weight:400;color:var(--ink-soft);text-transform:none;letter-spacing:0">(chamado, boleto, doc)</span></label>
+        <input id="tm-link" type="url" value="${esc(t?t.link||'':'')}" ${ehAdmin?'':'disabled'} placeholder="https://...">
+      </div>
+    </div>
+    <div class="row2">
       <div><label>Responsável ${ehAdmin&&!ehChecklist?'*':''}</label>
         <select id="tm-resp" ${ehAdmin?'':'disabled'}>
           <option value="">— selecione —</option>${respOpt}
@@ -7605,6 +7616,8 @@ async function salvarTarefa(){
   const responsavel=$('tm-resp').value;
   if(isAdminUser&&!responsavel){alert('Selecione o responsável.');return;}
   const dados={titulo,descricao:$('tm-desc').value.trim(),
+    link:$('tm-link').value.trim()||null,
+    origem:$('tm-origem').value.trim()||null,
     responsavel,responsavel_email:responsavel?emailFromNome(responsavel):null,
     prioridade:$('tm-pri').value,data_entrega:$('tm-data').value||null,status:$('tm-status').value};
   const novo=!currentTaskId;
