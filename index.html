@@ -2157,7 +2157,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v98';
+const APP_VERSION='v99';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -3718,13 +3718,16 @@ function taskCard(t){
   const ehChecklist=filhos.length>0;
   const concluidos=filhos.filter(f=>f.status==='Concluída').length;
   const linkBtn=t.link?`<a href="${esc(t.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Abrir link: ${esc(t.link)}" style="text-decoration:none;color:#1f6f5c;font-weight:600">🔗</a>`:'';
-  const origemLine=t.origem?`<div style="font-size:11px;color:var(--ink-soft);font-style:italic;margin-top:2px">de: ${esc(t.origem)}</div>`:'';
+  const contexto=[t.origem?'de: '+t.origem:'',t.canal?'via '+t.canal:''].filter(Boolean).join(' · ');
+  const origemLine=contexto?`<div style="font-size:11px;color:var(--ink-soft);font-style:italic;margin-top:2px">${esc(contexto)}</div>`:'';
+  const dpLine=t.data_pedido?`<span title="Chegou em ${fmt(t.data_pedido)}" style="font-size:10.5px;color:var(--ink-soft)">📥 ${fmt(t.data_pedido)}</span>`:'';
   return `<div class="task-card" data-task="${t.id}">
     <div class="tc-title">${ehChecklist?'☑ ':''}${esc(t.titulo||'')} ${linkBtn}</div>
     ${origemLine}
     <div class="tc-meta">
       <span class="pr-badge pr-${esc(t.prioridade||'Média')}">${esc(t.prioridade||'Média')}</span>
       ${t.responsavel?`<span>${esc(t.responsavel)}</span>`:''}
+      ${dpLine}
       ${t.data_entrega?`<span class="${overdue?'tc-overdue':''}">▢ ${fmt(t.data_entrega)}</span>`:''}
       ${ehChecklist?`<span style="font-weight:600;color:var(--accent-dark)">${concluidos}/${filhos.length}</span>`:''}
       ${(t.comentarios&&t.comentarios.length)?`<span>💬 ${t.comentarios.length}</span>`:''}
@@ -7550,8 +7553,19 @@ function openTaskModal(taskId){
     <label>Descrição</label>
     <textarea id="tm-desc" ${ehAdmin?'':'disabled'} placeholder="Detalhes da tarefa">${esc(t?t.descricao:'')}</textarea>
     <div class="row2">
+      <div><label>Data do pedido <span style="font-weight:400;color:var(--ink-soft);text-transform:none;letter-spacing:0">(quando chegou)</span></label>
+        <input id="tm-datap" type="date" value="${t?(t.data_pedido||''):new Date().toISOString().slice(0,10)}" ${ehAdmin?'':'disabled'}>
+      </div>
+      <div><label>Canal <span style="font-weight:400;color:var(--ink-soft);text-transform:none;letter-spacing:0">(por onde chegou)</span></label>
+        <input id="tm-canal" list="tm-canal-opts" value="${esc(t?t.canal||'':'')}" ${ehAdmin?'':'disabled'} placeholder="WhatsApp, e-mail, telefone...">
+        <datalist id="tm-canal-opts">
+          <option value="WhatsApp"><option value="E-mail"><option value="Telefone"><option value="Presencial"><option value="SGD"><option value="Sistema"><option value="Chat">
+        </datalist>
+      </div>
+    </div>
+    <div class="row2">
       <div><label>Origem <span style="font-weight:400;color:var(--ink-soft);text-transform:none;letter-spacing:0">(quem passou / de onde veio)</span></label>
-        <input id="tm-origem" value="${esc(t?t.origem||'':'')}" ${ehAdmin?'':'disabled'} placeholder="Ex.: Cliente Fulano, Maria - contabilidade, WhatsApp do gerente">
+        <input id="tm-origem" value="${esc(t?t.origem||'':'')}" ${ehAdmin?'':'disabled'} placeholder="Ex.: Cliente Fulano, Maria - contabilidade">
       </div>
       <div><label>Link <span style="font-weight:400;color:var(--ink-soft);text-transform:none;letter-spacing:0">(chamado, boleto, doc)</span></label>
         <input id="tm-link" type="url" value="${esc(t?t.link||'':'')}" ${ehAdmin?'':'disabled'} placeholder="https://...">
@@ -7618,6 +7632,8 @@ async function salvarTarefa(){
   const dados={titulo,descricao:$('tm-desc').value.trim(),
     link:$('tm-link').value.trim()||null,
     origem:$('tm-origem').value.trim()||null,
+    data_pedido:$('tm-datap').value||null,
+    canal:$('tm-canal').value.trim()||null,
     responsavel,responsavel_email:responsavel?emailFromNome(responsavel):null,
     prioridade:$('tm-pri').value,data_entrega:$('tm-data').value||null,status:$('tm-status').value};
   const novo=!currentTaskId;
