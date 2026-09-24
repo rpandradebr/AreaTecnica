@@ -2358,7 +2358,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v119';
+const APP_VERSION='v120';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -3570,15 +3570,30 @@ function renderFerAdm(){
   $('fa-lista').innerHTML=arr.length?arr.map(s=>{
     const periodos=(s.detalhes&&s.detalhes.periodos)||[],pend=s.status==='Pendente';
     const obs=s.detalhes&&s.detalhes.observacao;
-    const ph=periodos.map((pp,pi)=>`<div class="fa-period"><b style="font-size:13px">${esc(pp.label)}</b>${pp.prioridades.map((pr,idx)=>`<label class="fa-opt">${pend?`<input type="radio" name="fap-${s.id}-${pi}" value="${idx}" ${idx===0?'checked':''} style="width:auto">`:'•'} P${pr.prioridade}: ${fmt(pr.inicio)} → ${fmt(pr.fim)}</label>`).join('')}</div>`).join('');
+    const aprovadosDetalhe=(s.detalhes&&s.detalhes.periodos_aprovados)||{};
+    const ph=periodos.map((pp,pi)=>{
+      const jaAprov=aprovadosDetalhe[pi];
+      if(jaAprov){
+        const pr=pp.prioridades&&pp.prioridades[jaAprov.idx];
+        return `<div class="fa-period" style="background:#eef4ee;border-left:3px solid #1f6f5c;padding:8px 12px;border-radius:0 6px 6px 0;margin-bottom:6px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><b style="font-size:13px;color:#175547">${esc(pp.label)}</b><span style="background:#1f6f5c;color:#fff;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700">✓ APROVADO P${jaAprov.prio}</span></div>
+          ${pr?`<div style="font-size:12px;color:#175547;margin-top:4px">${fmt(pr.inicio)} → ${fmt(pr.fim)}</div>`:''}
+        </div>`;
+      }
+      const linhas=pp.prioridades.map((pr,idx)=>`<label class="fa-opt">${pend?`<input type="radio" name="fap-${s.id}-${pi}" value="${idx}" ${idx===0?'checked':''} style="width:auto">`:'•'} P${pr.prioridade}: ${fmt(pr.inicio)} → ${fmt(pr.fim)}</label>`).join('');
+      const btnAprovar=pend?`<div style="margin-top:6px"><button class="btn-edit" data-fa-ok-per="${s.id}" data-fa-per-idx="${pi}" style="font-size:11px;padding:4px 10px;background:#eef4ee;border-color:#87c1a5;color:#175547">✓ Aprovar este período</button></div>`:'';
+      return `<div class="fa-period"><b style="font-size:13px">${esc(pp.label)}</b>${linhas}${btnAprovar}</div>`;
+    }).join('');
     const obsHtml=obs?`<div style="margin-top:8px;padding:8px 12px;background:#fbf0e6;border-left:4px solid #c97e2f;border-radius:0 6px 6px 0;font-size:13px"><b style="text-transform:uppercase;font-size:10.5px;letter-spacing:.04em;color:#7a4e1f">💬 Observação do colaborador</b><div style="margin-top:2px;font-style:italic">${esc(obs)}</div></div>`:'';
+    const periodosRestantes=pend?periodos.filter((_,pi)=>!aprovadosDetalhe[pi]).length:0;
+    const btnGeral=pend&&periodosRestantes>0?`<button class="btn-edit" data-fa-ok="${s.id}">Aprovar ${periodosRestantes===periodos.length?'todos ':'restantes'}(${periodosRestantes})</button><button class="btn-del" data-fa-no="${s.id}">Recusar</button>`:'';
     return `<div class="row-item" style="cursor:default;flex-direction:column;align-items:stretch">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
         <div><div class="ri-main">${esc(s.colaborador)} — ${esc(ferOpLabel(s.opcao))}</div><div class="ri-sub" style="opacity:.7">${esc(s.solicitante_email||'')}</div></div>
         <span class="badge ${SOL_BADGE[s.status]||'b-desc'}">${esc(s.status||'')}</span>
       </div>${ph}${obsHtml}
       <div class="item-actions" style="margin-top:10px">
-        ${pend?`<button class="btn-edit" data-fa-ok="${s.id}">Aprovar com seleção</button><button class="btn-del" data-fa-no="${s.id}">Recusar</button>`:''}
+        ${btnGeral}
         <button class="btn-del" data-fa-del="${s.id}" title="Excluir pontualmente este pedido${s.status==='Aprovada'?' e as férias que ele gerou':''}">🗑 Excluir</button>
       </div>
     </div>`;}).join(''):'<div class="empty">Nenhum pedido de férias.</div>';
@@ -3923,18 +3938,55 @@ ${contexto}`;
   $('ia-fer-enviar').disabled=false;
   setTimeout(()=>$('ia-fer-input').focus(),50);
 }
+async function aprovarFerPeriodo(id,pi){
+  const s=ferReqs.find(x=>x.id===id);if(!s)return;
+  const periodos=(s.detalhes&&s.detalhes.periodos)||[];
+  const pp=periodos[pi];if(!pp){alert('Período não encontrado.');return;}
+  const aprovados=(s.detalhes&&s.detalhes.periodos_aprovados)||{};
+  if(aprovados[pi]){alert('Este período já foi aprovado.');return;}
+  const sel=document.querySelector('input[name="fap-'+id+'-'+pi+'"]:checked');
+  const idx=sel?parseInt(sel.value):0;
+  const pr=pp.prioridades&&pp.prioridades[idx];
+  if(!pr){alert('Nenhuma prioridade selecionada nesse período.');return;}
+  const nomeCan=_gfNomeCanonico(s.colaborador)||s.colaborador;
+  const insert={colaborador:nomeCan,data_inicio:pr.inicio,data_fim:pr.fim,observacao:pp.label+' (aprovado da solicitação · P'+pr.prioridade+')'};
+  const ins=await db.from('ferias').insert(insert);
+  if(ins.error){alert('Erro ao lançar nas Férias: '+ins.error.message);return;}
+  // Atualiza detalhes marcando esse período como aprovado
+  const novoDetalhes=JSON.parse(JSON.stringify(s.detalhes||{}));
+  novoDetalhes.periodos_aprovados=novoDetalhes.periodos_aprovados||{};
+  novoDetalhes.periodos_aprovados[pi]={idx,prio:pr.prioridade,inicio:pr.inicio,fim:pr.fim,em:new Date().toISOString()};
+  // Se todos os períodos foram aprovados, muda o status geral pra Aprovada
+  const todosAprov=periodos.every((_,i)=>novoDetalhes.periodos_aprovados[i]);
+  const upd={detalhes:novoDetalhes};
+  if(todosAprov)upd.status='Aprovada';
+  const u=await db.from('solicitacoes_ferias').update(upd).eq('id',id);
+  if(u.error){alert('Período lançado, mas erro ao atualizar solicitação: '+u.error.message);return;}
+  await openFerAdm();updatePendingBadges();
+  toast(todosAprov?`✓ Todos os períodos aprovados`:`✓ ${pp.label} aprovado (P${pr.prioridade})`);
+}
 async function aprovarFer(id){
   const s=ferReqs.find(x=>x.id===id);if(!s)return;
   const periodos=(s.detalhes&&s.detalhes.periodos)||[],inserts=[];
+  const aprovados=(s.detalhes&&s.detalhes.periodos_aprovados)||{};
+  const novoDetalhes=JSON.parse(JSON.stringify(s.detalhes||{}));
+  novoDetalhes.periodos_aprovados=novoDetalhes.periodos_aprovados||{};
   for(let pi=0;pi<periodos.length;pi++){
+    if(aprovados[pi])continue; // já foi aprovado individualmente
     const sel=document.querySelector('input[name="fap-'+id+'-'+pi+'"]:checked');
     const idx=sel?parseInt(sel.value):0,pr=periodos[pi].prioridades[idx]||periodos[pi].prioridades[0];
-    if(pr)inserts.push({colaborador:s.colaborador,data_inicio:pr.inicio,data_fim:pr.fim,observacao:periodos[pi].label+' (aprovado da solicitação · P'+pr.prioridade+')'});
+    if(pr){
+      const nomeCan=_gfNomeCanonico(s.colaborador)||s.colaborador;
+      inserts.push({colaborador:nomeCan,data_inicio:pr.inicio,data_fim:pr.fim,observacao:periodos[pi].label+' (aprovado da solicitação · P'+pr.prioridade+')'});
+      novoDetalhes.periodos_aprovados[pi]={idx,prio:pr.prioridade,inicio:pr.inicio,fim:pr.fim,em:new Date().toISOString()};
+    }
   }
-  const u=await db.from('solicitacoes_ferias').update({status:'Aprovada'}).eq('id',id);
+  if(!inserts.length){alert('Nenhum período restante para aprovar.');return;}
+  const u=await db.from('solicitacoes_ferias').update({status:'Aprovada',detalhes:novoDetalhes}).eq('id',id);
   if(u.error){alert('Erro: '+u.error.message);return;}
-  if(inserts.length){const ins=await db.from('ferias').insert(inserts);if(ins.error){alert('Pedido aprovado, mas houve erro ao lançar nas Férias: '+ins.error.message);}}
-  await openFerAdm();updatePendingBadges();toast('Férias aprovadas e lançadas ✓');
+  const ins=await db.from('ferias').insert(inserts);
+  if(ins.error){alert('Pedido aprovado, mas houve erro ao lançar nas Férias: '+ins.error.message);}
+  await openFerAdm();updatePendingBadges();toast(`✓ ${inserts.length} período(s) aprovado(s) e lançado(s)`);
 }
 async function recusarFer(id){
   const{error}=await db.from('solicitacoes_ferias').update({status:'Recusada'}).eq('id',id);
@@ -9066,7 +9118,7 @@ $('mt-lista').addEventListener('click',e=>{const up=e.target.getAttribute('data-
 $('fr-opcao').onchange=()=>renderFerPeriodos($('fr-opcao').value);
 $('fr-save').onclick=onSaveFer;
 $('fa-busca').oninput=renderFerAdm;$('fa-filtro').onchange=renderFerAdm;
-$('fa-lista').addEventListener('click',e=>{const ok=e.target.getAttribute('data-fa-ok'),no=e.target.getAttribute('data-fa-no'),del=e.target.getAttribute('data-fa-del');if(ok)aprovarFer(ok);if(no)recusarFer(no);if(del)excluirFer(del);});
+$('fa-lista').addEventListener('click',e=>{const ok=e.target.getAttribute('data-fa-ok'),no=e.target.getAttribute('data-fa-no'),del=e.target.getAttribute('data-fa-del'),okPer=e.target.getAttribute('data-fa-ok-per');if(ok)aprovarFer(ok);if(no)recusarFer(no);if(del)excluirFer(del);if(okPer){const pi=parseInt(e.target.getAttribute('data-fa-per-idx')||'0');aprovarFerPeriodo(okPer,pi);}});
 $('nav-soladm').onclick=()=>showView('soladm');
 $('sf-save').onclick=onSaveSolf;
 $('sa-busca').oninput=renderSolAdm;$('sa-filtro').onchange=renderSolAdm;
