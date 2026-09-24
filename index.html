@@ -1815,6 +1815,7 @@
           <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;margin:0"><input type="checkbox" id="gf-vencendo-only" onchange="renderGFerias()" style="width:16px;height:16px">Só quem tem período vencendo em 90 dias</label>
           <button class="btn-edit" onclick="gfExpandirTodos(true)" style="font-size:12px;padding:6px 10px">Expandir todos</button>
           <button class="btn-edit" onclick="gfExpandirTodos(false)" style="font-size:12px;padding:6px 10px">Recolher todos</button>
+          <button onclick="gfLimparDuplicatas()" style="font-size:12px;padding:6px 10px;background:#fbf4f4;border:1px solid #d9b0b0;color:#5f1e1e;border-radius:6px;cursor:pointer;font-family:inherit" title="Detecta e remove gozos duplicados (mesmo colab + mesmas datas)">🧹 Limpar duplicatas</button>
         </div>
         <div id="gf-lista"></div>
       </div>
@@ -2340,7 +2341,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v114';
+const APP_VERSION='v115';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -6560,14 +6561,56 @@ function gfSetSubTab(nome){
   renderGFerias();
 }
 
+function _gfDedupeGozos(arr){
+  const seen=new Set(),out=[];
+  const ord=[...arr].sort((a,b)=>{
+    const aId=a.id||'',bId=b.id||'';
+    return aId.localeCompare(bId);
+  });
+  ord.forEach(g=>{
+    const key=`${g.colaborador||''}|${g.data_inicio||''}|${g.data_fim||''}`;
+    if(!seen.has(key)){seen.add(key);out.push(g);}
+  });
+  return out;
+}
+
 async function openGFerias(){
   const [r,rs]=await Promise.all([
     db.from('ferias').select('*').order('data_inicio',{ascending:true}),
     db.from('solicitacoes_ferias').select('*').in('status',['Pendente','Aprovada'])
   ]);
-  gfFerias=r.error?[]:(r.data||[]);
+  const rawFer=r.error?[]:(r.data||[]);
+  gfFerias=_gfDedupeGozos(rawFer);
   gfSolicitacoes=rs.error?[]:(rs.data||[]);
   gfSetSubTab(gfSubTabAtual);
+}
+async function gfLimparDuplicatas(){
+  const r=await db.from('ferias').select('*');
+  if(r.error){alert('Erro ao consultar: '+r.error.message);return;}
+  const raw=r.data||[];
+  const grupos={};
+  raw.forEach(g=>{
+    const key=`${g.colaborador||''}|${g.data_inicio||''}|${g.data_fim||''}`;
+    (grupos[key]=grupos[key]||[]).push(g);
+  });
+  const dups=Object.values(grupos).filter(arr=>arr.length>1);
+  if(!dups.length){alert('✓ Nenhuma duplicata encontrada no banco.');return;}
+  const idsDeletar=[];
+  const detalhes=[];
+  dups.forEach(arr=>{
+    const ord=[...arr].sort((a,b)=>(a.id||'').localeCompare(b.id||''));
+    const manter=ord[0];
+    const remover=ord.slice(1);
+    detalhes.push(`• ${manter.colaborador} · ${_gfFmt(manter.data_inicio)} → ${_gfFmt(manter.data_fim)}: ${arr.length} registros (${remover.length} extra)`);
+    remover.forEach(g=>idsDeletar.push(g.id));
+  });
+  const preview=detalhes.slice(0,10).join('\n')+(detalhes.length>10?`\n... e mais ${detalhes.length-10} grupo(s)`:'');
+  const msg=`Foram encontrados ${dups.length} grupo(s) de duplicatas, totalizando ${idsDeletar.length} registro(s) extra(s):\n\n${preview}\n\nSerá mantido o registro mais antigo de cada grupo e os outros serão excluídos.\n\nAção irreversível. Confirmar?`;
+  if(!confirm(msg))return;
+  const {error}=await db.from('ferias').delete().in('id',idsDeletar);
+  if(error){alert('Erro ao deletar: '+error.message);return;}
+  toast(`✓ ${idsDeletar.length} duplicata(s) removida(s)`);
+  await openGFerias();
 }
 
 function _gfIso(d){return d.toISOString().slice(0,10);}
@@ -7148,7 +7191,7 @@ async function salvarGozoFerias(){
     const{data,error}=await db.from('ferias').insert(dados).select().single();
     if(error){alert('Erro ao salvar: '+error.message);return;}
     // Atualiza estado local sem refazer query completa (mais rápido)
-    if(data)gfFerias.push(data);
+    if(data){gfFerias.push(data);gfFerias=_gfDedupeGozos(gfFerias);}
     toast('✓ Gozo registrado');
     fecharGFModal();
     renderGFerias();
