@@ -495,6 +495,7 @@
           <option value="agendada">Agendadas (futuras)</option>
           <option value="concluida">Concluídas</option>
         </select>
+        <select id="fe-fano" style="width:auto;min-width:120px"></select>
         <select id="fe-fmes" style="width:auto;min-width:140px">
           <option value="">Todos os meses</option>
           <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
@@ -2357,7 +2358,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v118';
+const APP_VERSION='v119';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -2924,17 +2925,38 @@ async function openFerias(){
   ferias=data||[];fillColabSelect();renderFerias();renderFeriasCalendar();
 }
 function renderFerias(){
-  $('fe-c-agora').textContent=ferias.filter(f=>statusFeria(f)==='Em férias').length;
-  $('fe-c-agend').textContent=ferias.filter(f=>statusFeria(f)==='Agendada').length;
-  $('fe-c-conc').textContent=ferias.filter(f=>statusFeria(f)==='Concluída').length;
-  // popular filtro de técnico (normalizando nomes divergentes ao canônico)
-  const selT=$('fe-ftec'),curT=selT.value,nomesRaw=[...new Set(ferias.map(f=>_gfNomeCanonico(f.colaborador)||f.colaborador).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  // Dedupe local por nome canônico + datas (evita repetição por nomes divergentes)
+  const seen=new Set();
+  const feriasUniq=[];
+  [...ferias].sort((a,b)=>(a.id||'').localeCompare(b.id||'')).forEach(f=>{
+    const nomeCan=_gfNomeCanonico(f.colaborador)||f.colaborador||'';
+    const key=`${nomeCan}|${f.data_inicio||''}|${f.data_fim||''}`;
+    if(!seen.has(key)){seen.add(key);feriasUniq.push(f);}
+  });
+  $('fe-c-agora').textContent=feriasUniq.filter(f=>statusFeria(f)==='Em férias').length;
+  $('fe-c-agend').textContent=feriasUniq.filter(f=>statusFeria(f)==='Agendada').length;
+  $('fe-c-conc').textContent=feriasUniq.filter(f=>statusFeria(f)==='Concluída').length;
+  // popular filtro de ano com base nos dados (default: ano atual)
+  const selA=$('fe-fano'),curA=selA.value;
+  const anos=[...new Set(feriasUniq.map(f=>f.data_inicio?f.data_inicio.slice(0,4):null).filter(Boolean))].sort().reverse();
+  const anoAtual=String(new Date().getFullYear());
+  const anosOpts=['<option value="">Todos os anos</option>']
+    .concat(anos.map(y=>`<option value="${y}">${y}</option>`)).join('');
+  selA.innerHTML=anosOpts;
+  selA.value=curA||anoAtual||'';
+  // popular filtro de técnico (nomes canônicos)
+  const selT=$('fe-ftec'),curT=selT.value,nomesRaw=[...new Set(feriasUniq.map(f=>_gfNomeCanonico(f.colaborador)||f.colaborador).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
   selT.innerHTML='<option value="">Todos os técnicos</option>'+nomesRaw.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
   if(curT)selT.value=curT;
-  const q=$('fe-busca').value.trim().toLowerCase(),fst=$('fe-fstatus').value,fmes=parseInt($('fe-fmes').value)||0,ftec=$('fe-ftec').value;
+  // popular filtro de mês (só uma vez)
+  const selM=$('fe-fmes');
+  if(!selM.options.length){
+    selM.innerHTML='<option value="">Todos os meses</option>'+MESES.map((m,i)=>`<option value="${i+1}">${m}</option>`).join('');
+  }
+  const q=$('fe-busca').value.trim().toLowerCase(),fst=$('fe-fstatus').value,fmes=parseInt($('fe-fmes').value)||0,ftec=$('fe-ftec').value,fano=$('fe-fano').value;
   const hoje=new Date();hoje.setHours(0,0,0,0);
   const tres=new Date(hoje);tres.setMonth(tres.getMonth()+3);
-  const arr=ferias.filter(f=>{
+  const arr=feriasUniq.filter(f=>{
     const nomeCan=_gfNomeCanonico(f.colaborador)||f.colaborador||'';
     if(q&&!nomeCan.toLowerCase().includes(q))return false;
     if(ftec&&nomeCan!==ftec)return false;
@@ -2943,9 +2965,10 @@ function renderFerias(){
     if(fst==='agendada'&&st!=='Agendada')return false;
     if(fst==='concluida'&&st!=='Concluída')return false;
     if(fst==='prox3'){if(!f.data_inicio)return false;const di=new Date(f.data_inicio+'T00:00');if(di<hoje||di>tres)return false;}
+    if(fano){if(!f.data_inicio)return false;const yi=f.data_inicio.slice(0,4),yf=f.data_fim?f.data_fim.slice(0,4):yi;if(yi!==fano&&yf!==fano)return false;}
     if(fmes){if(!f.data_inicio)return false;const mi=new Date(f.data_inicio+'T00:00').getMonth()+1,mf=f.data_fim?new Date(f.data_fim+'T00:00').getMonth()+1:mi;if(mi!==fmes&&mf!==fmes)return false;}
     return true;
-  });
+  }).sort((a,b)=>(b.data_inicio||'').localeCompare(a.data_inicio||''));
   $('fe-lista').innerHTML=arr.length?arr.map(f=>{const st=statusFeria(f);const nomeExib=_gfNomeCanonico(f.colaborador)||f.colaborador;return`
     <div class="row-item" style="cursor:default;align-items:flex-start">
       <div><div class="ri-main">${esc(nomeExib)}</div>
@@ -2955,7 +2978,7 @@ function renderFerias(){
         <span class="badge ${feClass(st)}">${st}</span>
         <div class="item-actions"><button class="btn-edit" data-fe-edit="${f.id}">Editar</button><button class="btn-del" data-fe-del="${f.id}">Excluir</button></div>
       </div>
-    </div>`;}).join(''):'<div class="empty">Nenhuma férias lançada ainda.</div>';
+    </div>`;}).join(''):'<div class="empty">Nenhuma férias no filtro selecionado.</div>';
 }
 async function onSaveFeria(){
   const colabRaw=$('fe-colab').value.trim(),di=$('fe-ini').value,df=$('fe-fim').value;
@@ -3033,8 +3056,8 @@ const MESES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agos
 function curYM(){const d=new Date();return{y:d.getFullYear(),m:d.getMonth()};}
 function shiftMonth(ym,delta){let m=ym.m+delta,y=ym.y;while(m<0){m+=12;y--;}while(m>11){m-=12;y++;}return{y,m};}
 function eachDay(s,e,cb){let d=new Date(s+'T12:00:00'),end=new Date((e||s)+'T12:00:00');while(d<=end){cb(d.getFullYear(),d.getMonth(),d.getDate());d.setDate(d.getDate()+1);}}
-function feriasMarks(y,m){const mk={};ferias.forEach(f=>{if(!f.data_inicio)return;eachDay(f.data_inicio,f.data_fim||f.data_inicio,(yy,mm,dd)=>{if(yy===y&&mm===m){const k=dstr(yy,mm,dd);(mk[k]=mk[k]||[]).push(f.colaborador);}});});return mk;}
-function folgasMarks(y,m){const mk={};folgas.forEach(f=>{if(!f.data)return;const p=f.data.split('-');if(+p[0]===y&&(+p[1]-1)===m){(mk[f.data]=mk[f.data]||[]).push(f.colaborador+(f.tipo?' ('+f.tipo.replace('Folga ','')+')':''));}});return mk;}
+function feriasMarks(y,m){const mk={};ferias.forEach(f=>{if(!f.data_inicio)return;const nome=_gfNomeCanonico(f.colaborador)||f.colaborador||'';eachDay(f.data_inicio,f.data_fim||f.data_inicio,(yy,mm,dd)=>{if(yy===y&&mm===m){const k=dstr(yy,mm,dd);const set=(mk[k]=mk[k]||new Set());set.add(nome);}});});const out={};Object.entries(mk).forEach(([k,set])=>{out[k]=[...set].sort((a,b)=>a.localeCompare(b,'pt-BR'));});return out;}
+function folgasMarks(y,m){const mk={};folgas.forEach(f=>{if(!f.data)return;const p=f.data.split('-');if(+p[0]===y&&(+p[1]-1)===m){const nome=_gfNomeCanonico(f.colaborador)||f.colaborador||'';const set=(mk[f.data]=mk[f.data]||new Set());set.add(nome+(f.tipo?' ('+f.tipo.replace('Folga ','')+')':''));}});const out={};Object.entries(mk).forEach(([k,set])=>{out[k]=[...set].sort((a,b)=>a.localeCompare(b,'pt-BR'));});return out;}
 function calHTML(y,m,marks,cls){
   const fdow=new Date(y,m,1).getDay(),days=new Date(y,m+1,0).getDate(),t=hoje();
   let cells='';
@@ -3053,7 +3076,7 @@ function renderCal(boxId,detailId,ym,marksFn,cls,onShift){
 }
 function renderFeriasCalendar(){if(!feCal)feCal=curYM();renderCal('fe-cal','fe-cal-detail',feCal,feriasMarks,'',d=>{feCal=shiftMonth(feCal,d);renderFeriasCalendar();});}
 function renderFolgasCalendar(){if(!foCal)foCal=curYM();renderCal('fo-cal','fo-cal-detail',foCal,folgasMarks,'fo',d=>{foCal=shiftMonth(foCal,d);renderFolgasCalendar();});}
-function atestadosMarks(y,m){const mk={},pad=n=>String(n).padStart(2,'0');atestados.forEach(a=>{if(!a.data)return;const tp=a.tipo==='Atestado médico'?'Médico':(a.tipo||'');const lbl=a.colaborador+(tp?' ('+tp+')':'');const ini=new Date(a.data+'T00:00');const fim=a.data_fim?new Date(a.data_fim+'T00:00'):new Date(a.data+'T00:00');let s=0;for(let d=new Date(ini);d<=fim&&s<400;d.setDate(d.getDate()+1),s++){if(d.getFullYear()===y&&d.getMonth()===m){const k=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());(mk[k]=mk[k]||[]).push(lbl);}}});return mk;}
+function atestadosMarks(y,m){const mk={},pad=n=>String(n).padStart(2,'0');atestados.forEach(a=>{if(!a.data)return;const tp=a.tipo==='Atestado médico'?'Médico':(a.tipo||'');const nome=_gfNomeCanonico(a.colaborador)||a.colaborador||'';const lbl=nome+(tp?' ('+tp+')':'');const ini=new Date(a.data+'T00:00');const fim=a.data_fim?new Date(a.data_fim+'T00:00'):new Date(a.data+'T00:00');let s=0;for(let d=new Date(ini);d<=fim&&s<400;d.setDate(d.getDate()+1),s++){if(d.getFullYear()===y&&d.getMonth()===m){const k=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());const set=(mk[k]=mk[k]||new Set());set.add(lbl);}}});const out={};Object.entries(mk).forEach(([k,set])=>{out[k]=[...set].sort((a,b)=>a.localeCompare(b,'pt-BR'));});return out;}
 function renderAtestCalendar(){if(!atCal)atCal=curYM();renderCal('at-cal','at-cal-detail',atCal,atestadosMarks,'at',d=>{atCal=shiftMonth(atCal,d);renderAtestCalendar();});}
 
 // ===== Atestados =====
@@ -3121,7 +3144,7 @@ function editAtest(id){const a=atestados.find(x=>x.id===id);if(!a)return;$('at-c
 async function deleteAtest(id){const a=atestados.find(x=>x.id===id);if(!confirm('Excluir o atestado de "'+(a?a.colaborador:'')+'"?'))return;const{error}=await db.from('atestados').delete().eq('id',id);if(error){alert('Erro: '+error.message);return;}await openAtest();toast('Atestado excluído');}
 
 // ===== Aniversários =====
-function anivMarks(y,m){const mk={};anivs.forEach(a=>{if(!a.data_nascimento)return;const p=a.data_nascimento.split('-');if((+p[1]-1)===m){const k=dstr(y,m,+p[2]);(mk[k]=mk[k]||[]).push(a.colaborador);}});return mk;}
+function anivMarks(y,m){const mk={};anivs.forEach(a=>{if(!a.data_nascimento)return;const p=a.data_nascimento.split('-');if((+p[1]-1)===m){const k=dstr(y,m,+p[2]);const nome=_gfNomeCanonico(a.colaborador)||a.colaborador||'';const set=(mk[k]=mk[k]||new Set());set.add(nome);}});const out={};Object.entries(mk).forEach(([k,set])=>{out[k]=[...set].sort((a,b)=>a.localeCompare(b,'pt-BR'));});return out;}
 function renderAnivCalendar(){if(!anCal)anCal=curYM();renderCal('an-cal','an-cal-detail',anCal,anivMarks,'an',d=>{anCal=shiftMonth(anCal,d);renderAnivCalendar();});}
 function fillAnivColab(){
   const nomes=new Set();
@@ -9175,7 +9198,7 @@ $('fo-lista').addEventListener('click',e=>{const ed=e.target.getAttribute('data-
 $('fe-save').onclick=onSaveFeria;
 $('fe-cancel').onclick=clearFeria;
 $('fe-busca').oninput=renderFerias;
-$('fe-fstatus').onchange=renderFerias;$('fe-fmes').onchange=renderFerias;$('fe-ftec').onchange=renderFerias;
+$('fe-fstatus').onchange=renderFerias;$('fe-fmes').onchange=renderFerias;$('fe-ftec').onchange=renderFerias;$('fe-fano').onchange=renderFerias;
 $('fe-lista').addEventListener('click',e=>{const ed=e.target.getAttribute('data-fe-edit'),dl=e.target.getAttribute('data-fe-del');if(ed)editFeria(ed);if(dl)deleteFeria(dl);});
 $('sub-maq').onclick=()=>showSub('maq');
 $('sub-pes').onclick=()=>showSub('pes');
