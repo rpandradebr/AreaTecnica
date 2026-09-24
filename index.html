@@ -2206,7 +2206,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v104';
+const APP_VERSION='v105';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -3642,8 +3642,9 @@ function renderChatIA(msgs){
     if(m.role==='system-info')return `<div style="background:#eef4ee;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:12.5px;color:#175547;border-left:3px solid #1f6f5c">${esc(m.content)}</div>`;
     if(m.role==='user')return `<div style="text-align:right;margin-bottom:10px"><div style="display:inline-block;background:#1f6f5c;color:#fff;padding:8px 12px;border-radius:12px 12px 4px 12px;max-width:80%;text-align:left;font-size:13px;white-space:pre-wrap">${esc(m.content)}</div></div>`;
     if(m.role==='assistant')return `<div style="margin-bottom:10px"><div style="display:inline-block;background:#fff;border:1px solid var(--line);padding:10px 14px;border-radius:12px 12px 12px 4px;max-width:90%;font-size:13px;line-height:1.5;white-space:pre-wrap">${esc(m.content)}</div></div>`;
-    if(m.role==='error')return `<div style="background:#f5dcdc;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:12.5px;color:#801c1c;border-left:3px solid #a64141">⚠ ${esc(m.content)}</div>`;
+    if(m.role==='error')return `<div style="background:#f5dcdc;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:12.5px;color:#801c1c;border-left:3px solid #a64141">⚠ ${esc(m.content)}${m.acao||''}</div>`;
     if(m.role==='loading')return `<div style="margin-bottom:10px;color:var(--ink-soft);font-size:13px;font-style:italic">🧠 Pensando...</div>`;
+    if(m.role==='loading-retry')return `<div style="margin-bottom:10px;color:#c97e2f;font-size:13px;font-style:italic">⏳ ${esc(m.content)}</div>`;
     return '';
   }).join('');
   $('ia-fer-chat').innerHTML=html;
@@ -3662,6 +3663,30 @@ function _iaFerMontarContexto(){
     });
   });
   return JSON.stringify(linhas,null,0);
+}
+function _iaFerEhSobrecarga(msg){return /high demand|overload|rate limit|resource_exhausted|unavailable|try again later|503|429/i.test(msg||'');}
+async function _iaFerChamar(chave,modelo,systemMsg,msgsApi){
+  const url=`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(chave)}`;
+  const resp=await fetch(url,{
+    method:'POST',
+    headers:{'content-type':'application/json'},
+    body:JSON.stringify({system_instruction:{parts:[{text:systemMsg}]},contents:msgsApi,generationConfig:{temperature:0.4,maxOutputTokens:1024}})
+  });
+  const data=await resp.json();
+  if(!resp.ok){
+    const emsg=(data&&data.error&&data.error.message)||('HTTP '+resp.status);
+    const err=new Error(emsg);err.status=resp.status;throw err;
+  }
+  const cand=data.candidates&&data.candidates[0];
+  return cand&&cand.content&&cand.content.parts?cand.content.parts.map(p=>p.text||'').join('').trim():'(resposta vazia)';
+}
+function _iaFerTrocarPraLite(){
+  localStorage.setItem(IA_FER_MODEL_KEY,'gemini-3.1-flash-lite');
+  toast('✓ Modelo trocado pra flash-lite. Envie sua pergunta de novo.');
+  const el=$('ia-fer-modelo-atual');if(el)el.textContent='gemini-3.1-flash-lite';
+  // Remove última mensagem de erro
+  iaFerHistorico=iaFerHistorico.filter((m,i)=>!(i===iaFerHistorico.length-1&&m.role==='error'));
+  renderChatIA(iaFerHistorico);
 }
 async function enviarPerguntaIA(){
   const pergunta=$('ia-fer-input').value.trim();
@@ -3688,30 +3713,30 @@ ${contexto}`;
 
   const msgsApi=iaFerHistorico.filter(m=>m.role==='user'||m.role==='assistant').map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}));
 
-  try{
-    const url=`https://generativelanguage.googleapis.com/v1beta/models/${iaFerModel()}:generateContent?key=${encodeURIComponent(chave)}`;
-    const resp=await fetch(url,{
-      method:'POST',
-      headers:{'content-type':'application/json'},
-      body:JSON.stringify({
-        system_instruction:{parts:[{text:systemMsg}]},
-        contents:msgsApi,
-        generationConfig:{temperature:0.4,maxOutputTokens:1024}
-      })
-    });
-    const data=await resp.json();
-    if(!resp.ok){
-      const emsg=(data&&data.error&&data.error.message)||('HTTP '+resp.status);
-      iaFerHistorico.push({role:'error',content:'Erro da API: '+emsg});
+  const modeloAtual=iaFerModel();
+  let ultimoErro=null;
+  // Tenta 2 vezes: primeira imediata, segunda depois de 2.5s se for sobrecarga
+  for(let tentativa=1;tentativa<=2;tentativa++){
+    try{
+      const texto=await _iaFerChamar(chave,modeloAtual,systemMsg,msgsApi);
+      iaFerHistorico.push({role:'assistant',content:texto||'(resposta vazia)'});
       renderChatIA(iaFerHistorico);
-      $('ia-fer-enviar').disabled=false;return;
+      ultimoErro=null;break;
+    }catch(e){
+      ultimoErro=e;
+      if(tentativa===1&&_iaFerEhSobrecarga(e.message)){
+        // Sinaliza retry visualmente e espera
+        renderChatIA([...iaFerHistorico,{role:'loading-retry',content:'Servidor ocupado, tentando de novo em 2s...'}]);
+        await new Promise(r=>setTimeout(r,2500));
+        continue;
+      }
+      break;
     }
-    const cand=data.candidates&&data.candidates[0];
-    const texto=cand&&cand.content&&cand.content.parts?cand.content.parts.map(p=>p.text||'').join('').trim():'(resposta vazia)';
-    iaFerHistorico.push({role:'assistant',content:texto||'(resposta vazia)'});
-    renderChatIA(iaFerHistorico);
-  }catch(e){
-    iaFerHistorico.push({role:'error',content:'Erro de rede: '+e.message+'. Verifique sua conexão e a chave.'});
+  }
+  if(ultimoErro){
+    const sobrecarga=_iaFerEhSobrecarga(ultimoErro.message);
+    const acao=sobrecarga&&modeloAtual!=='gemini-3.1-flash-lite'?`<div style="margin-top:6px"><button onclick="_iaFerTrocarPraLite()" style="background:#175547;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:11px;cursor:pointer">Trocar pra gemini-3.1-flash-lite (menos concorrido)</button></div>`:'';
+    iaFerHistorico.push({role:'error',content:ultimoErro.message,acao});
     renderChatIA(iaFerHistorico);
   }
   $('ia-fer-enviar').disabled=false;
