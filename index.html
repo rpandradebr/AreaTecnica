@@ -1730,9 +1730,15 @@
       .gf-colab.open .gf-colab-body{display:block}
       .gf-per{background:#fff;border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-bottom:10px}
       .gf-per.completo{border-left:4px solid #1f6f5c}
+      .gf-per.agendado-total{border-left:4px solid #2c7a5e;background:linear-gradient(to right,#f0f7f2 0%,#fff 100%)}
+      .gf-per.so-agendado{border-left:4px solid #4a5a8c;background:linear-gradient(to right,#f2f4fa 0%,#fff 100%)}
       .gf-per.parcial{border-left:4px solid #c97e2f}
       .gf-per.aberto{border-left:4px solid #4a5a8c}
       .gf-per.vencido{border-left:4px solid #a64141;background:#fbf4f4}
+      .gf-gozo-badge{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin-left:6px;vertical-align:middle}
+      .gf-gozo-badge.realizado{background:#dfebe0;color:#175547}
+      .gf-gozo-badge.agendado{background:#e6ecf5;color:#2b3a63}
+      .gf-gozo-badge.andamento{background:#fbf0e6;color:#7a4e1f}
       .gf-per h4{margin:0 0 6px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:8px}
       .gf-per .datas{font-size:11.5px;color:var(--ink-soft)}
       .gf-per .saldo{display:flex;gap:14px;flex-wrap:wrap;margin:8px 0;font-size:12px}
@@ -2294,7 +2300,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v107';
+const APP_VERSION='v108';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -6544,13 +6550,29 @@ function atribuirGozosAosPeriodos(gozosColab,periodos){
   return periodos;
 }
 
+function _gfClassificaGozos(p,hoje){
+  const hjIso=_gfIso(hoje);
+  let realizado=0,emAndamento=0,agendado=0;
+  p.gozos.forEach(g=>{
+    if(g.data_fim<hjIso){g.estado='realizado';realizado+=g.dias;}
+    else if(g.data_inicio>hjIso){g.estado='agendado';agendado+=g.dias;}
+    else{g.estado='andamento';emAndamento+=g.dias;}
+  });
+  p.diasRealizados=realizado;
+  p.diasEmAndamento=emAndamento;
+  p.diasAgendados=agendado;
+}
 function _gfStatusPeriodo(p,hoje){
   const hj=hoje||new Date();
-  const vencido=new Date(p.concessivoFim+'T12:00')<hj&&p.diasGozados<30;
+  _gfClassificaGozos(p,hj);
+  const efetivoOuComprometido=p.diasRealizados+p.diasEmAndamento+p.diasAgendados;
+  const vencido=new Date(p.concessivoFim+'T12:00')<hj&&efetivoOuComprometido<30;
   const diasParaVencer=Math.round((new Date(p.concessivoFim+'T12:00')-hj)/86400000);
-  if(p.diasGozados>=30)return{key:'completo',label:'✓ Totalmente gozado',cor:'#1f6f5c',diasParaVencer};
+  if(p.diasGozados>=30&&p.diasAgendados===0)return{key:'completo',label:'✓ Totalmente gozado',cor:'#1f6f5c',diasParaVencer};
+  if(efetivoOuComprometido>=30&&p.diasAgendados>0)return{key:'agendado-total',label:`🗓 Coberto — ${p.diasAgendados}d agendado`,cor:'#2c7a5e',diasParaVencer};
   if(vencido)return{key:'vencido',label:'⚠ VENCIDO — saldo perdido/em risco',cor:'#a64141',diasParaVencer};
-  if(p.diasGozados>0)return{key:'parcial',label:'⏳ Parcial (saldo '+(30-p.diasGozados)+' dias)',cor:'#c97e2f',diasParaVencer};
+  if(p.diasAgendados>0&&p.diasRealizados+p.diasEmAndamento===0)return{key:'so-agendado',label:`🗓 Só agendado (${p.diasAgendados}d) — saldo ${30-efetivoOuComprometido}d`,cor:'#4a5a8c',diasParaVencer};
+  if(p.diasRealizados+p.diasEmAndamento>0)return{key:'parcial',label:`⏳ Parcial — saldo ${30-efetivoOuComprometido}d`,cor:'#c97e2f',diasParaVencer};
   return{key:'aberto',label:'🆕 Aberto (30 dias)',cor:'#4a5a8c',diasParaVencer};
 }
 
@@ -6567,7 +6589,7 @@ function renderGFerias(){
     if(busca&&!cn.toLowerCase().includes(busca)&&!(e.nome_curto||'').toLowerCase().includes(busca))return;
     const gozosColab=gfFerias.filter(f=>f.colaborador===cn);
     const periodos=e.admissao?atribuirGozosAosPeriodos(gozosColab,calcPeriodosAquisitivos(e.admissao,hoje)):[];
-    const temVencendo=periodos.some(p=>{const s=_gfStatusPeriodo(p,hoje);return s.key==='parcial'||s.key==='aberto'?(s.diasParaVencer<=90&&s.diasParaVencer>=0):s.key==='vencido';});
+    const temVencendo=periodos.some(p=>{const s=_gfStatusPeriodo(p,hoje);const saldoReal=30-(p.diasRealizados+p.diasEmAndamento+p.diasAgendados);return saldoReal>0&&(s.key==='vencido'||(s.diasParaVencer<=90&&s.diasParaVencer>=0));});
     if(soVenc&&!temVencendo)return;
     total++;
     const aberto=gfExpandidos.has(cn);
@@ -6591,17 +6613,27 @@ function _gfBodyHTML(e,periodos,hoje){
   let h='';
   periodos.forEach(p=>{
     const st=_gfStatusPeriodo(p,hoje);
-    const saldo=30-p.diasGozados;
-    const gozosList=p.gozos.length?`<div class="gf-gozos"><b>Gozos registrados:</b><ul>${p.gozos.map(g=>`<li>${_gfFmt(g.data_inicio)} → ${_gfFmt(g.data_fim)} <b>(${g.dias} dias)</b>${g.observacao?' — <span style="color:var(--ink-soft);font-style:italic">'+esc(g.observacao)+'</span>':''}</li>`).join('')}</ul></div>`:'<div class="gf-gozos gf-empty-warn">Nenhum gozo registrado neste período.</div>';
-    const alertaVenc=(st.key==='parcial'||st.key==='aberto')&&st.diasParaVencer>=0&&st.diasParaVencer<=90?`<div style="margin-top:6px;padding:6px 10px;background:#fbf0e6;border-left:3px solid #c97e2f;border-radius:0 4px 4px 0;font-size:11.5px;color:#7a4e1f">⏰ Vence em ${st.diasParaVencer} dias — programar gozo com urgência</div>`:'';
+    const efetivoOuComprometido=p.diasRealizados+p.diasEmAndamento+p.diasAgendados;
+    const saldo=30-efetivoOuComprometido;
+    const badgeGozo=g=>{
+      if(g.estado==='realizado')return '<span class="gf-gozo-badge realizado">✓ Realizado</span>';
+      if(g.estado==='agendado')return '<span class="gf-gozo-badge agendado">📅 Agendado</span>';
+      if(g.estado==='andamento')return '<span class="gf-gozo-badge andamento">🔄 Em andamento</span>';
+      return '';
+    };
+    const gozosOrdenados=[...p.gozos].sort((a,b)=>(a.data_inicio||'').localeCompare(b.data_inicio||''));
+    const gozosList=p.gozos.length?`<div class="gf-gozos"><b>Gozos:</b><ul>${gozosOrdenados.map(g=>`<li>${_gfFmt(g.data_inicio)} → ${_gfFmt(g.data_fim)} <b>(${g.dias}d)</b>${badgeGozo(g)}${g.observacao?' — <span style="color:var(--ink-soft);font-style:italic">'+esc(g.observacao)+'</span>':''}</li>`).join('')}</ul></div>`:'<div class="gf-gozos gf-empty-warn">Nenhum gozo registrado neste período.</div>';
+    const alertaVenc=(st.key==='parcial'||st.key==='aberto'||st.key==='so-agendado')&&saldo>0&&st.diasParaVencer>=0&&st.diasParaVencer<=90?`<div style="margin-top:6px;padding:6px 10px;background:#fbf0e6;border-left:3px solid #c97e2f;border-radius:0 4px 4px 0;font-size:11.5px;color:#7a4e1f">⏰ Vence em ${st.diasParaVencer} dias — programar gozo com urgência</div>`:'';
+    // Breakdown do saldo — só mostra as linhas com valor > 0
+    const linhasSaldo=[`<div>Direito: <b>30d</b></div>`];
+    if(p.diasRealizados>0)linhasSaldo.push(`<div>✓ Realizado: <b style="color:#175547">${p.diasRealizados}d</b></div>`);
+    if(p.diasEmAndamento>0)linhasSaldo.push(`<div>🔄 Em andamento: <b style="color:#7a4e1f">${p.diasEmAndamento}d</b></div>`);
+    if(p.diasAgendados>0)linhasSaldo.push(`<div>📅 Agendado: <b style="color:#2b3a63">${p.diasAgendados}d</b></div>`);
+    linhasSaldo.push(`<div>Saldo a programar: <b style="color:${saldo>0?'#c97e2f':'#1f6f5c'}">${saldo}d</b></div>`);
     h+=`<div class="gf-per ${st.key}">
       <h4><span>Período aquisitivo ${p.numero}: ${_gfFmt(p.inicio)} → ${_gfFmt(p.fim)}</span> <span class="status-pill" style="background:${st.cor};color:#fff">${st.label}</span></h4>
       <div class="datas">Concessivo até: <b>${_gfFmt(p.concessivoFim)}</b></div>
-      <div class="saldo">
-        <div>Direito: <b>30d</b></div>
-        <div>Gozado: <b style="color:#1f6f5c">${p.diasGozados}d</b></div>
-        <div>Saldo: <b style="color:${saldo>0?'#c97e2f':'#1f6f5c'}">${saldo}d</b></div>
-      </div>
+      <div class="saldo">${linhasSaldo.join('')}</div>
       ${alertaVenc}
       ${gozosList}
       ${saldo>0?`<div style="margin-top:10px"><button class="btn-primary" onclick="abrirGFModal('${esc(cn).replace(/'/g,"\\'")}',${p.numero},'${p.inicio}','${p.concessivoFim}',${saldo})" style="font-size:12px;padding:6px 12px">+ Registrar gozo neste período</button></div>`:''}
@@ -6652,7 +6684,10 @@ function gfCalcularAlertas(){
     const periodos=atribuirGozosAosPeriodos(gozos,calcPeriodosAquisitivos(e.admissao,hoje));
     periodos.forEach(p=>{
       const st=_gfStatusPeriodo(p,hoje);
-      const saldo=30-p.diasGozados;
+      const efetivoOuComprometido=p.diasRealizados+p.diasEmAndamento+p.diasAgendados;
+      const saldo=30-efetivoOuComprometido;
+      // Se já foi tudo agendado/gozado (saldo=0), NÃO gera alerta
+      if(saldo<=0&&st.key!=='vencido')return;
       const alertaBase={colab:cn,periodoNum:p.numero,periodoInicio:p.inicio,concessivoFim:p.concessivoFim,saldo};
       if(st.key==='vencido'){
         alertas.push({...alertaBase,id:`venc-${cn}-${p.numero}`,severidade:'critico',ordem:0,titulo:'⚠ CONCESSIVO VENCIDO — saldo em risco',desc:`<b>${esc(nomeShort)}</b> · Período aquisitivo ${p.numero} (${_gfFmt(p.inicio)} → ${_gfFmt(p.fim)}) · Concessivo venceu em <b>${_gfFmt(p.concessivoFim)}</b> · Saldo pendente: <b>${saldo} dias</b>`});
