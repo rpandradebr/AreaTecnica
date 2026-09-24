@@ -1475,9 +1475,18 @@
       <div id="ia-fer-config" style="display:none;background:#fbf0e6;border:1px solid #d9b489;border-radius:8px;padding:14px;margin-bottom:10px">
         <div style="font-size:13px;font-weight:600;color:#7a4e1f;margin-bottom:8px">Configurar chave da API do Google Gemini (uma vez)</div>
         <p class="hint" style="margin-bottom:8px">Pegue sua chave grátis em <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#1f6f5c">aistudio.google.com/apikey</a> (começa com <code>AIza</code>). O free tier permite 1500 requisições por dia grátis. Ela fica salva só neste navegador.<br><b>Atenção:</b> a assinatura "Gemini Advanced" (aquela do app) <b>não</b> gera essa chave — precisa criar no AI Studio, é separado (e grátis).</p>
+        <label style="font-size:11px">Chave</label>
         <input id="ia-fer-chave" type="password" placeholder="AIza..." style="width:100%;font-family:monospace;font-size:12px">
+        <label style="font-size:11px;margin-top:8px">Modelo</label>
+        <select id="ia-fer-modelo" style="width:100%;font-size:12px">
+          <option value="gemini-flash-latest">gemini-flash-latest (sempre o Flash mais novo — recomendado)</option>
+          <option value="gemini-3.5-flash">gemini-3.5-flash (estável GA)</option>
+          <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (mais barato, mais rápido)</option>
+          <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
+          <option value="gemini-pro-latest">gemini-pro-latest (mais caro, mais capaz)</option>
+        </select>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn-primary" onclick="salvarChaveIA()" style="font-size:12px;padding:6px 14px">Salvar chave</button>
+          <button class="btn-primary" onclick="salvarChaveIA()" style="font-size:12px;padding:6px 14px">Salvar</button>
           <button class="btn-edit" onclick="fecharIAFer()" style="font-size:12px;padding:6px 14px">Cancelar</button>
         </div>
       </div>
@@ -1490,10 +1499,10 @@
           <button class="btn-primary" onclick="enviarPerguntaIA()" id="ia-fer-enviar" style="padding:10px 18px;font-size:13px;white-space:nowrap">Enviar ↵</button>
         </div>
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink-soft);margin-top:6px;flex-wrap:wrap;gap:6px">
-          <span>Modelo: <b>gemini-2.5-flash</b> · grátis até 1500 req/dia · O contexto dos pedidos é enviado automaticamente</span>
+          <span>Modelo: <b id="ia-fer-modelo-atual">gemini-flash-latest</b> · O contexto dos pedidos é enviado automaticamente</span>
           <span>
             <button onclick="novaConversaIA()" style="background:transparent;border:none;color:#1f6f5c;text-decoration:underline;cursor:pointer;font-size:11px">Nova conversa</button> ·
-            <button onclick="trocarChaveIA()" style="background:transparent;border:none;color:#1f6f5c;text-decoration:underline;cursor:pointer;font-size:11px">Trocar chave</button>
+            <button onclick="trocarChaveIA()" style="background:transparent;border:none;color:#1f6f5c;text-decoration:underline;cursor:pointer;font-size:11px">Trocar chave/modelo</button>
           </span>
         </div>
       </div>
@@ -2197,7 +2206,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v103';
+const APP_VERSION='v104';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -3585,13 +3594,16 @@ function detectarConcentracao(periodos){
 
 // ===== IA de férias (Gemini via API Google AI Studio) =====
 const IA_FER_KEY='google_gemini_api_key';
-const IA_FER_MODEL='gemini-2.5-flash';
+const IA_FER_MODEL_KEY='google_gemini_model';
+const IA_FER_MODEL_DEFAULT='gemini-flash-latest';
+function iaFerModel(){return localStorage.getItem(IA_FER_MODEL_KEY)||IA_FER_MODEL_DEFAULT;}
 let iaFerHistorico=[];
 
 function abrirIAFer(){
   $('ia-fer-bg').style.display='flex';
   const chave=localStorage.getItem(IA_FER_KEY);
-  if(!chave){$('ia-fer-config').style.display='block';$('ia-fer-form').style.display='none';setTimeout(()=>$('ia-fer-chave').focus(),80);return;}
+  const el=$('ia-fer-modelo-atual');if(el)el.textContent=iaFerModel();
+  if(!chave){$('ia-fer-config').style.display='block';$('ia-fer-form').style.display='none';$('ia-fer-modelo').value=iaFerModel();$('ia-fer-chave').placeholder='AIza...';setTimeout(()=>$('ia-fer-chave').focus(),80);return;}
   $('ia-fer-config').style.display='none';
   $('ia-fer-form').style.display='block';
   if(!iaFerHistorico.length)renderChatIA([{role:'system-info',content:'Olá! Sou seu assistente pra decisões de férias. Já carreguei todos os pedidos atuais como contexto. Me pergunte qualquer coisa — ex.: "quem devo priorizar?", "há conflitos graves?", "sugere uma ordem de aprovação".'}]);
@@ -3600,21 +3612,29 @@ function abrirIAFer(){
 }
 function fecharIAFer(){$('ia-fer-bg').style.display='none';}
 function salvarChaveIA(){
-  // Remove espaços, quebras de linha e caracteres invisíveis (BOM, zero-width, etc)
   let c=$('ia-fer-chave').value.replace(/[\s\u200B-\u200D\uFEFF]/g,'');
-  if(!c){alert('Cole a chave antes de salvar.');return;}
-  if(c.length<20){alert('A chave parece curta demais ('+c.length+' caracteres). Verifique se copiou inteira.');return;}
-  if(!c.startsWith('AIza')){
-    if(!confirm('A chave não começa com "AIza" (padrão do Google AI Studio).\n\nSalvar mesmo assim e deixar o Google validar?'))return;
+  const jaTem=!!localStorage.getItem(IA_FER_KEY);
+  if(!c&&!jaTem){alert('Cole a chave antes de salvar.');return;}
+  if(c){
+    if(c.length<20){alert('A chave parece curta demais ('+c.length+' caracteres). Verifique se copiou inteira.');return;}
+    if(!c.startsWith('AIza')){
+      if(!confirm('A chave não começa com "AIza" (padrão do Google AI Studio).\n\nSalvar mesmo assim e deixar o Google validar?'))return;
+    }
+    localStorage.setItem(IA_FER_KEY,c);
   }
-  localStorage.setItem(IA_FER_KEY,c);
+  const mod=$('ia-fer-modelo').value||IA_FER_MODEL_DEFAULT;
+  localStorage.setItem(IA_FER_MODEL_KEY,mod);
   $('ia-fer-chave').value='';
-  toast('✓ Chave salva neste navegador');
+  toast(c?'✓ Chave e modelo salvos':'✓ Modelo atualizado');
   abrirIAFer();
 }
 function trocarChaveIA(){
-  if(!confirm('Remover a chave salva? Você precisará colar de novo pra usar a IA.'))return;
-  localStorage.removeItem(IA_FER_KEY);iaFerHistorico=[];abrirIAFer();
+  // Volta pra tela de config sem apagar nada — permite trocar chave OU só o modelo
+  $('ia-fer-config').style.display='block';
+  $('ia-fer-form').style.display='none';
+  $('ia-fer-modelo').value=iaFerModel();
+  $('ia-fer-chave').placeholder='(deixe vazio pra manter a chave atual)';
+  setTimeout(()=>$('ia-fer-modelo').focus(),80);
 }
 function novaConversaIA(){iaFerHistorico=[];renderChatIA([{role:'system-info',content:'Nova conversa iniciada. O contexto dos pedidos foi recarregado.'}]);}
 function renderChatIA(msgs){
@@ -3669,7 +3689,7 @@ ${contexto}`;
   const msgsApi=iaFerHistorico.filter(m=>m.role==='user'||m.role==='assistant').map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}));
 
   try{
-    const url=`https://generativelanguage.googleapis.com/v1beta/models/${IA_FER_MODEL}:generateContent?key=${encodeURIComponent(chave)}`;
+    const url=`https://generativelanguage.googleapis.com/v1beta/models/${iaFerModel()}:generateContent?key=${encodeURIComponent(chave)}`;
     const resp=await fetch(url,{
       method:'POST',
       headers:{'content-type':'application/json'},
