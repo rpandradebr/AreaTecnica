@@ -2308,7 +2308,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v109';
+const APP_VERSION='v110';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -6632,7 +6632,10 @@ function _gfBodyHTML(e,periodos,hoje){
       return '';
     };
     const gozosOrdenados=[...p.gozos].sort((a,b)=>(a.data_inicio||'').localeCompare(b.data_inicio||''));
-    const gozosList=p.gozos.length?`<div class="gf-gozos"><b>Gozos:</b><ul>${gozosOrdenados.map(g=>`<li>${_gfFmt(g.data_inicio)} → ${_gfFmt(g.data_fim)} <b>(${g.dias}d)</b>${badgeGozo(g)}${g.observacao?' — <span style="color:var(--ink-soft);font-style:italic">'+esc(g.observacao)+'</span>':''}</li>`).join('')}</ul></div>`:'<div class="gf-gozos gf-empty-warn">Nenhum gozo registrado neste período.</div>';
+    const gozosList=p.gozos.length?`<div class="gf-gozos"><b>Gozos:</b><ul>${gozosOrdenados.map(g=>{
+      const btnDel=g.id?`<button onclick="event.stopPropagation();excluirGozoFerias('${g.id}','${esc(cn).replace(/'/g,"\\'")}','${g.data_inicio}','${g.data_fim}')" title="Excluir este gozo" style="background:transparent;border:none;color:#a64141;cursor:pointer;font-size:12px;padding:0 4px;margin-left:4px">🗑</button>`:'';
+      return `<li>${_gfFmt(g.data_inicio)} → ${_gfFmt(g.data_fim)} <b>(${g.dias}d)</b>${badgeGozo(g)}${g.observacao?' — <span style="color:var(--ink-soft);font-style:italic">'+esc(g.observacao)+'</span>':''}${btnDel}</li>`;
+    }).join('')}</ul></div>`:'<div class="gf-gozos gf-empty-warn">Nenhum gozo registrado neste período.</div>';
     const alertaVenc=(st.key==='parcial'||st.key==='aberto'||st.key==='so-agendado')&&saldo>0&&st.diasParaVencer>=0&&st.diasParaVencer<=90?`<div style="margin-top:6px;padding:6px 10px;background:#fbf0e6;border-left:3px solid #c97e2f;border-radius:0 4px 4px 0;font-size:11.5px;color:#7a4e1f">⏰ Vence em ${st.diasParaVencer} dias — programar gozo com urgência</div>`:'';
     const linhasSaldo=[`<div>Direito: <b>30d</b></div>`];
     if(p.diasRealizados>0)linhasSaldo.push(`<div>✓ Realizado: <b style="color:#175547">${p.diasRealizados}d</b></div>`);
@@ -6798,6 +6801,8 @@ document.addEventListener('DOMContentLoaded',()=>{const el=$('gf-m-fim');if(el)e
 
 async function salvarGozoFerias(){
   if(!gfModalCtx.colab)return;
+  const btn=document.querySelector('#gf-modal-bg .btn-primary');
+  if(btn&&btn.disabled)return; // proteção anti-duplo-clique
   const ini=$('gf-m-ini').value,fim=$('gf-m-fim').value;
   if(!ini||!fim){alert('Preencha data início e fim.');return;}
   if(fim<ini){alert('Data fim deve ser igual ou depois da data início.');return;}
@@ -6806,11 +6811,30 @@ async function salvarGozoFerias(){
     if(!confirm(`Este gozo tem ${dias} dias mas o saldo do período é ${gfModalCtx.saldo}. Salvar mesmo assim? (O excedente será atribuído a outro período aquisitivo automaticamente.)`))return;
   }
   const dados={colaborador:gfModalCtx.colab,data_inicio:ini,data_fim:fim,observacao:$('gf-m-obs').value.trim()||null};
-  const{error}=await db.from('ferias').insert(dados);
-  if(error){alert('Erro ao salvar: '+error.message);return;}
-  toast('✓ Gozo registrado');
-  fecharGFModal();
-  await openGFerias();
+  const textoOriginal=btn?btn.textContent:'';
+  if(btn){btn.disabled=true;btn.textContent='Salvando...';btn.style.opacity='0.7';}
+  try{
+    const{data,error}=await db.from('ferias').insert(dados).select().single();
+    if(error){alert('Erro ao salvar: '+error.message);return;}
+    // Atualiza estado local sem refazer query completa (mais rápido)
+    if(data)gfFerias.push(data);
+    toast('✓ Gozo registrado');
+    fecharGFModal();
+    renderGFerias();
+  }catch(e){
+    alert('Erro inesperado: '+e.message);
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent=textoOriginal;btn.style.opacity='';}
+  }
+}
+async function excluirGozoFerias(id,colab,ini,fim){
+  if(!confirm(`Excluir esse gozo?\n\n${esc(colab)}\n${_gfFmt(ini)} → ${_gfFmt(fim)}\n\nAção irreversível.`))return;
+  const{error}=await db.from('ferias').delete().eq('id',id);
+  if(error){alert('Erro ao excluir: '+error.message);return;}
+  // Remove da lista local
+  gfFerias=gfFerias.filter(f=>f.id!==id);
+  toast('✓ Gozo excluído');
+  renderGFerias();
 }
 // Bind manual do input de data fim (o listener no DOMContentLoaded pode não pegar se já carregou)
 setTimeout(()=>{const el=$('gf-m-fim');if(el&&!el._bound){el.addEventListener('change',_gfRecalcFim);el._bound=true;}},500);
