@@ -987,7 +987,8 @@
       </select>
       <select id="fa-mes" onchange="renderFerAdm()" style="width:auto;min-width:130px"><option value="">Todos os meses</option></select>
       <button class="btn-edit" onclick="exportarPedidosFerias()" style="flex:none;font-size:12px;padding:6px 12px" title="Baixa xlsx com todos os períodos sugeridos">📊 Exportar planilha</button>
-      <button class="btn-edit" onclick="toggleAssistenteFer()" style="flex:none;font-size:12px;padding:6px 12px;background:#eef4ee;color:#175547;border-color:#c4dcc9" title="Análise inteligente dos pedidos">🤖 Assistente</button>
+      <button class="btn-edit" onclick="toggleAssistenteFer()" style="flex:none;font-size:12px;padding:6px 12px;background:#eef4ee;color:#175547;border-color:#c4dcc9" title="Análise automática (sem IA)">🤖 Assistente</button>
+      <button class="btn-edit" onclick="abrirIAFer()" style="flex:none;font-size:12px;padding:6px 12px;background:#e6ecf5;color:#2b3a63;border-color:#b5c2df" title="Conversar com IA sobre os pedidos">🧠 Perguntar à IA</button>
       <button class="btn-del" onclick="zerarTabelaUma('solicitacoes_ferias','pedidos de férias',openFerAdm)" style="flex:none;font-size:12px;padding:6px 10px;background:#fbf4f4;color:#a64141;border-color:#d9b3b3" title="Apaga todos os pedidos de férias">🗑 Zerar</button>
     </div>
     <div id="fa-assistente" style="display:none;background:#eef4ee;border:1px solid #c4dcc9;border-radius:8px;padding:16px;margin-bottom:14px"></div>
@@ -1460,6 +1461,42 @@
         <button id="mie-t-exp" onclick="mieSetEq('ExpConv')">Exp-Conv</button>
       </div>
       <div id="mie-conteudo"></div>
+    </div>
+  </div>
+
+  <!-- MODAL: IA de férias -->
+  <div id="ia-fer-bg" class="modal-bg" style="display:none" onclick="if(event.target===this)fecharIAFer()">
+    <div class="modal-card" style="max-width:760px;height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:17px;font-weight:600">🧠 Assistente IA — Programação de férias</div>
+        <button onclick="fecharIAFer()" style="background:transparent;border:none;color:#5a5548;font-size:22px;cursor:pointer;line-height:1">×</button>
+      </div>
+
+      <div id="ia-fer-config" style="display:none;background:#fbf0e6;border:1px solid #d9b489;border-radius:8px;padding:14px;margin-bottom:10px">
+        <div style="font-size:13px;font-weight:600;color:#7a4e1f;margin-bottom:8px">Configurar chave da API do Google Gemini (uma vez)</div>
+        <p class="hint" style="margin-bottom:8px">Pegue sua chave grátis em <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#1f6f5c">aistudio.google.com/apikey</a> (começa com <code>AIza</code>). O free tier permite 1500 requisições por dia grátis. Ela fica salva só neste navegador.<br><b>Atenção:</b> a assinatura "Gemini Advanced" (aquela do app) <b>não</b> gera essa chave — precisa criar no AI Studio, é separado (e grátis).</p>
+        <input id="ia-fer-chave" type="password" placeholder="AIza..." style="width:100%;font-family:monospace;font-size:12px">
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn-primary" onclick="salvarChaveIA()" style="font-size:12px;padding:6px 14px">Salvar chave</button>
+          <button class="btn-edit" onclick="fecharIAFer()" style="font-size:12px;padding:6px 14px">Cancelar</button>
+        </div>
+      </div>
+
+      <div id="ia-fer-chat" style="flex:1;overflow-y:auto;background:#faf8f2;padding:14px;border-radius:8px;margin-bottom:10px;min-height:200px"></div>
+
+      <div id="ia-fer-form" style="display:none">
+        <div style="display:flex;gap:8px;align-items:flex-end">
+          <textarea id="ia-fer-input" rows="2" placeholder="Ex.: qual a melhor ordem de aprovação? Posso aprovar todos os pedidos de novembro? Quem devo priorizar?" style="flex:1;font-size:13px;resize:vertical" onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.ctrlKey){event.preventDefault();enviarPerguntaIA()}"></textarea>
+          <button class="btn-primary" onclick="enviarPerguntaIA()" id="ia-fer-enviar" style="padding:10px 18px;font-size:13px;white-space:nowrap">Enviar ↵</button>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ink-soft);margin-top:6px;flex-wrap:wrap;gap:6px">
+          <span>Modelo: <b>gemini-2.5-flash</b> · grátis até 1500 req/dia · O contexto dos pedidos é enviado automaticamente</span>
+          <span>
+            <button onclick="novaConversaIA()" style="background:transparent;border:none;color:#1f6f5c;text-decoration:underline;cursor:pointer;font-size:11px">Nova conversa</button> ·
+            <button onclick="trocarChaveIA()" style="background:transparent;border:none;color:#1f6f5c;text-decoration:underline;cursor:pointer;font-size:11px">Trocar chave</button>
+          </span>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2160,7 +2197,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v100';
+const APP_VERSION='v102';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -3544,6 +3581,116 @@ function detectarConcentracao(periodos){
   const out=[];
   Object.entries(porDia).forEach(([data,set])=>{if(set.size>=3)out.push({data,n:set.size,colabs:[...set]});});
   return out.sort((a,b)=>b.n-a.n||a.data.localeCompare(b.data));
+}
+
+// ===== IA de férias (Gemini via API Google AI Studio) =====
+const IA_FER_KEY='google_gemini_api_key';
+const IA_FER_MODEL='gemini-2.5-flash';
+let iaFerHistorico=[];
+
+function abrirIAFer(){
+  $('ia-fer-bg').style.display='flex';
+  const chave=localStorage.getItem(IA_FER_KEY);
+  if(!chave){$('ia-fer-config').style.display='block';$('ia-fer-form').style.display='none';setTimeout(()=>$('ia-fer-chave').focus(),80);return;}
+  $('ia-fer-config').style.display='none';
+  $('ia-fer-form').style.display='block';
+  if(!iaFerHistorico.length)renderChatIA([{role:'system-info',content:'Olá! Sou seu assistente pra decisões de férias. Já carreguei todos os pedidos atuais como contexto. Me pergunte qualquer coisa — ex.: "quem devo priorizar?", "há conflitos graves?", "sugere uma ordem de aprovação".'}]);
+  else renderChatIA(iaFerHistorico);
+  setTimeout(()=>$('ia-fer-input').focus(),80);
+}
+function fecharIAFer(){$('ia-fer-bg').style.display='none';}
+function salvarChaveIA(){
+  const c=$('ia-fer-chave').value.trim();
+  if(!c.startsWith('AIza')){alert('Chave inválida. Deve começar com "AIza" (chave do Google AI Studio).');return;}
+  localStorage.setItem(IA_FER_KEY,c);
+  $('ia-fer-chave').value='';
+  toast('✓ Chave salva neste navegador');
+  abrirIAFer();
+}
+function trocarChaveIA(){
+  if(!confirm('Remover a chave salva? Você precisará colar de novo pra usar a IA.'))return;
+  localStorage.removeItem(IA_FER_KEY);iaFerHistorico=[];abrirIAFer();
+}
+function novaConversaIA(){iaFerHistorico=[];renderChatIA([{role:'system-info',content:'Nova conversa iniciada. O contexto dos pedidos foi recarregado.'}]);}
+function renderChatIA(msgs){
+  const html=msgs.map(m=>{
+    if(m.role==='system-info')return `<div style="background:#eef4ee;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:12.5px;color:#175547;border-left:3px solid #1f6f5c">${esc(m.content)}</div>`;
+    if(m.role==='user')return `<div style="text-align:right;margin-bottom:10px"><div style="display:inline-block;background:#1f6f5c;color:#fff;padding:8px 12px;border-radius:12px 12px 4px 12px;max-width:80%;text-align:left;font-size:13px;white-space:pre-wrap">${esc(m.content)}</div></div>`;
+    if(m.role==='assistant')return `<div style="margin-bottom:10px"><div style="display:inline-block;background:#fff;border:1px solid var(--line);padding:10px 14px;border-radius:12px 12px 12px 4px;max-width:90%;font-size:13px;line-height:1.5;white-space:pre-wrap">${esc(m.content)}</div></div>`;
+    if(m.role==='error')return `<div style="background:#f5dcdc;padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:12.5px;color:#801c1c;border-left:3px solid #a64141">⚠ ${esc(m.content)}</div>`;
+    if(m.role==='loading')return `<div style="margin-bottom:10px;color:var(--ink-soft);font-size:13px;font-style:italic">🧠 Pensando...</div>`;
+    return '';
+  }).join('');
+  $('ia-fer-chat').innerHTML=html;
+  $('ia-fer-chat').scrollTop=$('ia-fer-chat').scrollHeight;
+}
+function _iaFerMontarContexto(){
+  // Compacta o cenário atual pra enviar como contexto
+  const linhas=[];
+  ferReqs.forEach(s=>{
+    const periodos=(s.detalhes&&s.detalhes.periodos)||[];
+    const obs=s.detalhes&&s.detalhes.observacao;
+    periodos.forEach(pp=>{
+      (pp.prioridades||[]).forEach(pr=>{
+        linhas.push({colab:s.colaborador,opcao:ferOpLabel(s.opcao),bloco:pp.label,prio:pr.prioridade,inicio:pr.inicio,fim:pr.fim,status:s.status,obs:obs||undefined});
+      });
+    });
+  });
+  return JSON.stringify(linhas,null,0);
+}
+async function enviarPerguntaIA(){
+  const pergunta=$('ia-fer-input').value.trim();
+  if(!pergunta)return;
+  const chave=localStorage.getItem(IA_FER_KEY);
+  if(!chave){alert('Chave não configurada.');abrirIAFer();return;}
+  $('ia-fer-input').value='';
+  $('ia-fer-enviar').disabled=true;
+  iaFerHistorico.push({role:'user',content:pergunta});
+  renderChatIA([...iaFerHistorico,{role:'loading'}]);
+
+  const contexto=_iaFerMontarContexto();
+  const dataHoje=new Date().toISOString().slice(0,10);
+  const systemMsg=`Você é assistente de programação de férias da diretoria administrativa da Linux S/A Tecnologia (Salvador/BA). A gestora está revisando pedidos de férias dos técnicos e precisa decidir aprovações.
+
+Cada colaborador propõe até 3 datas por bloco de férias (P1 preferida, P2 alternativa, P3 última opção). Sua tarefa é ajudar a evitar conflitos (sobreposição entre colegas), respeitar preferências (dar prioridade a P1 quando possível), sinalizar épocas críticas (dezembro, janeiro, julho) e considerar observações escritas pelos colaboradores.
+
+Data de hoje: ${dataHoje}
+
+Responda de forma direta e prática em português brasileiro, sem preâmbulo tipo "Ótima pergunta!" e sem repetir o contexto de volta. Vá direto ao ponto. Se recomendar aprovação, diga qual prioridade (P1/P2/P3) e por quê. Cite nomes de colaboradores quando relevante.
+
+DADOS DOS PEDIDOS ATUAIS (JSON):
+${contexto}`;
+
+  const msgsApi=iaFerHistorico.filter(m=>m.role==='user'||m.role==='assistant').map(m=>({role:m.role==='assistant'?'model':'user',parts:[{text:m.content}]}));
+
+  try{
+    const url=`https://generativelanguage.googleapis.com/v1beta/models/${IA_FER_MODEL}:generateContent?key=${encodeURIComponent(chave)}`;
+    const resp=await fetch(url,{
+      method:'POST',
+      headers:{'content-type':'application/json'},
+      body:JSON.stringify({
+        system_instruction:{parts:[{text:systemMsg}]},
+        contents:msgsApi,
+        generationConfig:{temperature:0.4,maxOutputTokens:1024}
+      })
+    });
+    const data=await resp.json();
+    if(!resp.ok){
+      const emsg=(data&&data.error&&data.error.message)||('HTTP '+resp.status);
+      iaFerHistorico.push({role:'error',content:'Erro da API: '+emsg});
+      renderChatIA(iaFerHistorico);
+      $('ia-fer-enviar').disabled=false;return;
+    }
+    const cand=data.candidates&&data.candidates[0];
+    const texto=cand&&cand.content&&cand.content.parts?cand.content.parts.map(p=>p.text||'').join('').trim():'(resposta vazia)';
+    iaFerHistorico.push({role:'assistant',content:texto||'(resposta vazia)'});
+    renderChatIA(iaFerHistorico);
+  }catch(e){
+    iaFerHistorico.push({role:'error',content:'Erro de rede: '+e.message+'. Verifique sua conexão e a chave.'});
+    renderChatIA(iaFerHistorico);
+  }
+  $('ia-fer-enviar').disabled=false;
+  setTimeout(()=>$('ia-fer-input').focus(),50);
 }
 async function aprovarFer(id){
   const s=ferReqs.find(x=>x.id===id);if(!s)return;
