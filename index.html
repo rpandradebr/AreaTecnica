@@ -1811,6 +1811,7 @@
     <div class="modal-card" style="max-width:500px" onclick="event.stopPropagation()">
       <div style="font-size:17px;font-weight:600;margin-bottom:6px">Registrar gozo de férias</div>
       <div id="gf-modal-info" style="background:#f7f5ee;border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-size:12px;margin-bottom:12px;color:#5a5548"></div>
+      <div id="gf-modal-sugs" style="background:#fbf0e6;border:1px solid #d9b489;border-radius:6px;padding:8px 10px;margin-bottom:10px;display:none"></div>
       <div class="row2">
         <div><label>Data início</label><input id="gf-m-ini" type="date" onchange="_gfRecalcFim()"></div>
         <div><label>Quantidade de dias</label>
@@ -2324,7 +2325,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v111';
+const APP_VERSION='v112';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -6524,11 +6525,16 @@ function renderAtendChartAtd(linhas){
 
 // ===== Gestão de Férias por Período Aquisitivo =====
 $('nav-gferias').onclick=()=>showView('gferias');
-let gfFerias=[],gfExpandidos=new Set(),gfModalCtx={colab:null};
+let gfFerias=[],gfSolicitacoes=[],gfExpandidos=new Set(),gfModalCtx={colab:null};
+const ATEND_SQL_ERR2='';
 
 async function openGFerias(){
-  const r=await db.from('ferias').select('*').order('data_inicio',{ascending:true});
+  const [r,rs]=await Promise.all([
+    db.from('ferias').select('*').order('data_inicio',{ascending:true}),
+    db.from('solicitacoes_ferias').select('*').in('status',['Pendente','Aprovada'])
+  ]);
   gfFerias=r.error?[]:(r.data||[]);
+  gfSolicitacoes=rs.error?[]:(rs.data||[]);
   renderGFerias();
 }
 
@@ -6631,11 +6637,47 @@ function renderGFerias(){
   if(!total)html='<div class="empty">Nenhum colaborador encontrado com os filtros atuais.</div>';
   $('gf-lista').innerHTML=html;
 }
+function _gfSugestoesDe(cn){
+  const out=[];
+  gfSolicitacoes.filter(s=>s.colaborador===cn).forEach(s=>{
+    const periodos=(s.detalhes&&s.detalhes.periodos)||[];
+    periodos.forEach(pp=>{
+      (pp.prioridades||[]).forEach(pr=>{
+        if(!pr.inicio||!pr.fim)return;
+        out.push({pedidoId:s.id,status:s.status,opcao:s.opcao,bloco:pp.label,prio:pr.prioridade,inicio:pr.inicio,fim:pr.fim,obs:(s.detalhes&&s.detalhes.observacao)||'',dias:_gfDiasEntre(pr.inicio,pr.fim)});
+      });
+    });
+  });
+  return out;
+}
 function _gfBodyHTML(e,periodos,hoje){
   const cn=e.nome_completo||e.nome_curto||'';
   if(!e.admissao)return '<div class="empty" style="padding:10px 0">Cadastre a data de admissão do colaborador em Equipe pra calcular os períodos aquisitivos.</div>';
   if(!periodos.length)return '<div class="empty" style="padding:10px 0">Nenhum período aquisitivo completado até hoje.</div>';
-  let h='';
+  // Bloco de sugestões enviadas pelo colab
+  const sugs=_gfSugestoesDe(cn);
+  let sugHtml='';
+  if(sugs.length){
+    // Agrupa por pedidoId pra mostrar os pedidos separadamente
+    const porPedido={};sugs.forEach(s=>{(porPedido[s.pedidoId]=porPedido[s.pedidoId]||[]).push(s);});
+    const pedidos=Object.values(porPedido);
+    const escColab=cn.replace(/'/g,"\\'");
+    sugHtml=`<div style="background:#fbf0e6;border:1px solid #d9b489;border-left:4px solid #c97e2f;border-radius:0 6px 6px 0;padding:10px 14px;margin-bottom:12px">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#7a4e1f;font-weight:700;margin-bottom:6px">📨 Sugestões enviadas pelo colaborador (${sugs.length} data${sugs.length>1?'s':''} propostas)</div>
+      ${pedidos.map(pd=>{
+        const s0=pd[0];
+        const statusBadge=s0.status==='Aprovada'?'<span style="background:#dfebe0;color:#175547;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;margin-left:4px">APROVADO</span>':'<span style="background:#fbf0e6;color:#7a4e1f;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;margin-left:4px">PENDENTE</span>';
+        // Agrupa por bloco
+        const porBloco={};pd.forEach(x=>{(porBloco[x.bloco]=porBloco[x.bloco]||[]).push(x);});
+        const blocos=Object.entries(porBloco);
+        return `<div style="margin-top:6px;padding-top:6px${pedidos.length>1?';border-top:1px dashed #d9b489':''}">
+          <div style="font-size:12px;font-weight:600;color:#5f3e15">Pedido — ${esc(s0.opcao||'')} ${statusBadge}${s0.obs?' <span style="font-size:11px;font-style:italic;color:var(--ink-soft)">— '+esc(s0.obs)+'</span>':''}</div>
+          ${blocos.map(([bloco,arr])=>`<div style="margin-top:4px;font-size:12px"><b>${esc(bloco)}:</b> ${arr.sort((a,b)=>a.prio-b.prio).map(x=>`<button onclick="event.stopPropagation();gfUsarSugestao('${escColab}','${x.inicio}','${x.fim}')" title="Registrar essas datas como gozo" style="display:inline-block;background:#fff;border:1px solid #c97e2f;color:#7a4e1f;padding:3px 8px;border-radius:4px;font-size:11px;margin:2px 3px;cursor:pointer;font-family:inherit">P${x.prio}: ${_gfFmt(x.inicio)} → ${_gfFmt(x.fim)} (${x.dias}d) <span style="color:#1f6f5c;font-weight:700">+ Registrar</span></button>`).join('')}</div>`).join('')}
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+  let h=sugHtml;
   periodos.forEach(p=>{
     const st=_gfStatusPeriodo(p,hoje);
     const efetivoOuComprometido=p.diasRealizados+p.diasEmAndamento+p.diasAgendados;
@@ -6683,6 +6725,30 @@ function _gfBodyHTML(e,periodos,hoje){
 }
 function gfTogglePer(el){
   el.dataset.perOpen=el.dataset.perOpen==='1'?'0':'1';
+}
+function gfUsarSugestao(colab,ini,fim){
+  // Descobre em qual período aquisitivo essa data cai
+  const e=equipe.find(x=>(x.nome_completo||x.nome_curto||'')===colab);
+  if(!e||!e.admissao){alert('Colaborador sem admissão cadastrada.');return;}
+  const hoje=new Date();
+  const periodos=atribuirGozosAosPeriodos(gfFerias.filter(f=>f.colaborador===colab),calcPeriodosAquisitivos(e.admissao,hoje));
+  // Acha período cujo concessivo cobre a data ini e ainda tem saldo
+  let alvo=periodos.find(p=>{
+    const cInicio=_gfAddDays(p.fim,1);
+    const efetivo=p.diasRealizados+p.diasEmAndamento+p.diasAgendados;
+    return cInicio<=ini&&ini<=p.concessivoFim&&efetivo<30;
+  });
+  if(!alvo)alvo=periodos.find(p=>{const efetivo=p.diasRealizados+p.diasEmAndamento+p.diasAgendados;return efetivo<30;});
+  if(!alvo){alert('Este colaborador não tem período aquisitivo com saldo disponível.');return;}
+  const efetivo=alvo.diasRealizados+alvo.diasEmAndamento+alvo.diasAgendados;
+  const saldo=30-efetivo;
+  abrirGFModal(colab,alvo.numero,alvo.inicio,alvo.concessivoFim,saldo);
+  // Pré-preenche as datas
+  setTimeout(()=>{
+    $('gf-m-ini').value=ini;
+    $('gf-m-fim').value=fim;
+    $('gf-m-diascalc').value=_gfDiasEntre(ini,fim);
+  },100);
 }
 function gfToggle(cn){
   if(gfExpandidos.has(cn))gfExpandidos.delete(cn);else gfExpandidos.add(cn);
@@ -6895,9 +6961,19 @@ function gfRenderCards(){
 function abrirGFModal(colab,periodoNum,periodoInicio,concessivoFim,saldo){
   gfModalCtx={colab,periodoNum,concessivoFim,saldo};
   $('gf-modal-info').innerHTML=`<b>${esc(colab)}</b> · Período aquisitivo ${periodoNum} · Saldo: <b>${saldo} dias</b> · Concessivo vence em ${_gfFmt(concessivoFim)}`;
+  // Se o colab tem sugestões, adiciona chips clicáveis
+  const sugs=_gfSugestoesDe(colab);
+  const areaSugs=$('gf-modal-sugs');
+  if(areaSugs){
+    if(sugs.length){
+      areaSugs.style.display='block';
+      areaSugs.innerHTML=`<div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#7a4e1f;font-weight:700;margin-bottom:4px">📨 Datas sugeridas pelo colaborador (clique pra usar)</div>`+
+        sugs.map(x=>`<button type="button" onclick="_gfPreencheDatas('${x.inicio}','${x.fim}')" style="display:inline-block;background:#fff;border:1px solid #c97e2f;color:#7a4e1f;padding:3px 8px;border-radius:4px;font-size:11px;margin:2px 3px;cursor:pointer;font-family:inherit">P${x.prio}: ${_gfFmt(x.inicio)} → ${_gfFmt(x.fim)} (${x.dias}d)</button>`).join('');
+    }else{areaSugs.style.display='none';}
+  }
   // Sugere início: hoje ou início do concessivo (o que for maior)
   const hoje=_gfIso(new Date());
-  const cInicio=_gfAddDays(_gfAddYears(periodoInicio,1),-1); // fim do aquisitivo = início do concessivo -1
+  const cInicio=_gfAddDays(_gfAddYears(periodoInicio,1),-1);
   const sugIni=hoje>cInicio?hoje:cInicio;
   $('gf-m-ini').value=sugIni;
   $('gf-m-fim').value='';
@@ -6905,6 +6981,11 @@ function abrirGFModal(colab,periodoNum,periodoInicio,concessivoFim,saldo){
   $('gf-m-obs').value='';
   $('gf-modal-bg').style.display='flex';
   setTimeout(()=>$('gf-m-ini').focus(),80);
+}
+function _gfPreencheDatas(ini,fim){
+  $('gf-m-ini').value=ini;
+  $('gf-m-fim').value=fim;
+  $('gf-m-diascalc').value=_gfDiasEntre(ini,fim);
 }
 function fecharGFModal(){$('gf-modal-bg').style.display='none';gfModalCtx={colab:null};}
 function _gfSetDias(n){
