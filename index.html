@@ -250,6 +250,7 @@
         <button id="nav-metas">Metas (Sat SGD Fone/Web/Chat)</button>
         <button id="nav-dashmetas">Dashboard de Metas</button>
         <button id="nav-atend">Atendimentos por técnico</button>
+        <button id="nav-gferias">Gestão de férias</button>
       </div>
     </div>
 
@@ -1717,6 +1718,77 @@
     </div>
   </div>
 
+  <!-- VIEW: GESTÃO DE FÉRIAS POR PERÍODO AQUISITIVO -->
+  <div id="view-gferias" style="display:none">
+    <style>
+      .gf-colab{background:#faf8f2;border:1px solid var(--line);border-radius:8px;margin-bottom:8px;overflow:hidden}
+      .gf-colab-head{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;cursor:pointer;font-family:inherit;background:transparent;border:none;width:100%;text-align:left;transition:background .15s}
+      .gf-colab-head:hover{background:#f0ede4}
+      .gf-colab-head .chev{transition:transform .18s;color:var(--ink-soft)}
+      .gf-colab.open .gf-colab-head .chev{transform:rotate(90deg)}
+      .gf-colab-body{display:none;padding:0 16px 16px}
+      .gf-colab.open .gf-colab-body{display:block}
+      .gf-per{background:#fff;border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-bottom:10px}
+      .gf-per.completo{border-left:4px solid #1f6f5c}
+      .gf-per.parcial{border-left:4px solid #c97e2f}
+      .gf-per.aberto{border-left:4px solid #4a5a8c}
+      .gf-per.vencido{border-left:4px solid #a64141;background:#fbf4f4}
+      .gf-per h4{margin:0 0 6px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:8px}
+      .gf-per .datas{font-size:11.5px;color:var(--ink-soft)}
+      .gf-per .saldo{display:flex;gap:14px;flex-wrap:wrap;margin:8px 0;font-size:12px}
+      .gf-per .saldo b{font-size:15px;font-family:var(--display)}
+      .gf-per .status-pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+      .gf-gozos{margin-top:8px;font-size:12px}
+      .gf-gozos ul{margin:4px 0;padding-left:20px}
+      .gf-gozos li{padding:2px 0}
+      .gf-empty-warn{color:var(--ink-soft);font-style:italic;font-size:11.5px}
+    </style>
+    <div class="form-card" style="background:transparent;border:none;box-shadow:none;padding:0;margin-bottom:14px">
+      <h2>Gestão de Férias por Período Aquisitivo</h2>
+      <p class="hint">Controle dos períodos aquisitivos e gozos por colaborador. Cálculo automático a partir da data de admissão. Fracionamento em blocos de 5, 10 ou 15 dias (ou datas livres).</p>
+    </div>
+    <div class="form-card">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
+        <div style="flex:1;min-width:220px">
+          <input id="gf-busca" oninput="renderGFerias()" placeholder="Buscar por colaborador..." style="width:100%">
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;margin:0"><input type="checkbox" id="gf-vencendo-only" onchange="renderGFerias()" style="width:16px;height:16px">Só quem tem período vencendo em 90 dias</label>
+        <button class="btn-edit" onclick="gfExpandirTodos(true)" style="font-size:12px;padding:6px 10px">Expandir todos</button>
+        <button class="btn-edit" onclick="gfExpandirTodos(false)" style="font-size:12px;padding:6px 10px">Recolher todos</button>
+      </div>
+      <div id="gf-lista"></div>
+    </div>
+  </div>
+
+  <!-- MODAL: registrar novo gozo -->
+  <div id="gf-modal-bg" class="modal-bg" style="display:none" onclick="if(event.target===this)fecharGFModal()">
+    <div class="modal-card" style="max-width:500px" onclick="event.stopPropagation()">
+      <div style="font-size:17px;font-weight:600;margin-bottom:6px">Registrar gozo de férias</div>
+      <div id="gf-modal-info" style="background:#f7f5ee;border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-size:12px;margin-bottom:12px;color:#5a5548"></div>
+      <div class="row2">
+        <div><label>Data início</label><input id="gf-m-ini" type="date" onchange="_gfRecalcFim()"></div>
+        <div><label>Quantidade de dias</label>
+          <div style="display:flex;gap:4px">
+            <button type="button" onclick="_gfSetDias(5)" class="btn-edit" style="padding:6px 10px;font-size:12px;flex:1">5</button>
+            <button type="button" onclick="_gfSetDias(10)" class="btn-edit" style="padding:6px 10px;font-size:12px;flex:1">10</button>
+            <button type="button" onclick="_gfSetDias(15)" class="btn-edit" style="padding:6px 10px;font-size:12px;flex:1">15</button>
+            <button type="button" onclick="_gfSetDias(30)" class="btn-edit" style="padding:6px 10px;font-size:12px;flex:1">30</button>
+          </div>
+        </div>
+      </div>
+      <div class="row2">
+        <div><label>Data fim</label><input id="gf-m-fim" type="date"></div>
+        <div><label>Dias calculados</label><input id="gf-m-diascalc" readonly style="background:#f4f1ea"></div>
+      </div>
+      <label>Observação (opcional)</label>
+      <input id="gf-m-obs" placeholder="Ex.: viagem em família, prioridade P1 do pedido">
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn-edit" onclick="fecharGFModal()">Cancelar</button>
+        <button class="btn-primary" onclick="salvarGozoFerias()">Salvar gozo</button>
+      </div>
+    </div>
+  </div>
+
   <!-- VIEW: KANBAN PERFORMANCE -->
   <div id="view-perf" style="display:none">
     <div class="form-card" style="background:transparent;border:none;box-shadow:none;padding:0;margin-bottom:14px">
@@ -2206,7 +2278,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v105';
+const APP_VERSION='v106';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -2249,7 +2321,7 @@ async function showApp(user){
   setupPresence();
   $('nav').style.display='flex';
   // Admin geral (visível para os 3 admins): cadastros, relatórios, gestão de equipe/patrimônio, dashboards
-  ['nav-cad','nav-rel','nav-eq','nav-us','nav-aloc','nav-met','nav-perf','nav-dperf','nav-exp2b','nav-ausmes','nav-mie','nav-fer','nav-fol','nav-ho','nav-ate','nav-aniv','nav-ocor','nav-prob','nav-trein','nav-anom','nav-fat','nav-dash','nav-insatadm','nav-tar','nav-rot','nav-onb'].forEach(id=>$(id).style.display=isAdminUser?'':'none');
+  ['nav-cad','nav-rel','nav-eq','nav-us','nav-aloc','nav-met','nav-perf','nav-dperf','nav-exp2b','nav-ausmes','nav-mie','nav-fer','nav-fol','nav-ho','nav-ate','nav-aniv','nav-ocor','nav-prob','nav-trein','nav-anom','nav-fat','nav-dash','nav-insatadm','nav-tar','nav-rot','nav-onb','nav-gferias'].forEach(id=>$(id).style.display=isAdminUser?'':'none');
   // Aprovação de pedidos: EXCLUSIVO do Rafael (Maria e Tiago não veem, precisam pedir pra ele aprovar)
   ['nav-soladm','nav-feradm','nav-atadm','nav-ocadm','nav-mtadm'].forEach(id=>$(id).style.display=isRafael?'':'none');
   // Metas colaborador + Comparativo anual + Plan. Estratégico: EXCLUSIVO do Rafael
@@ -2444,7 +2516,7 @@ async function registrarManutencao(patr){
 
 // ===== Views =====
 function showView(v){
-  const adminViews=['cadastro','relatorios','eq','us','ferias','folgas','ho','aloc','met','metcol','compano','plantel','exp2b','ausmes','mie','metas','dashmetas','atend','perf','dperf','atestados','aniv','ocor','prob','trein','anom','fat','dash','insatadm','soladm','feradm','atadm','ocadm','mtadm','tar','rot','onb'];
+  const adminViews=['cadastro','relatorios','eq','us','ferias','folgas','ho','aloc','met','metcol','compano','plantel','exp2b','ausmes','mie','metas','dashmetas','atend','gferias','perf','dperf','atestados','aniv','ocor','prob','trein','anom','fat','dash','insatadm','soladm','feradm','atadm','ocadm','mtadm','tar','rot','onb'];
   if(adminViews.includes(v)&&!isAdminUser)v='solfolga';
   $('view-cadastro').style.display=v==='cadastro'?'block':'none';
   $('view-relatorios').style.display=v==='relatorios'?'block':'none';
@@ -2487,6 +2559,7 @@ function showView(v){
   $('view-metas').style.display=v==='metas'?'block':'none';
   $('view-dashmetas').style.display=v==='dashmetas'?'block':'none';
   $('view-atend').style.display=v==='atend'?'block':'none';
+  $('view-gferias').style.display=v==='gferias'?'block':'none';
   document.body.classList.toggle('metas-view',v==='metas'||v==='dashmetas'||v==='atend');
   document.body.classList.toggle('compano-view',v==='compano'||v==='plantel'||v==='exp2b');
   document.body.classList.toggle('ausmes-view',v==='ausmes');
@@ -2594,6 +2667,7 @@ function showView(v){
   if(v==='metas')openMetas();
   if(v==='dashmetas')openDashMetas();
   if(v==='atend')openAtend();
+  if(v==='gferias')openGFerias();
   if(v==='insatadm')openInsatAdm();
   if(v==='meusinsat')openMeusInsat();
   if(v==='fin-novo')openFinNovo();
@@ -6401,6 +6475,179 @@ function renderAtendChartAtd(linhas){
   const labels=linhas.map(l=>_dmShortName(l.colab));
   atendCharts.atd=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Recebidas',data:linhas.map(l=>l.rec),backgroundColor:'#4a5a8c',borderRadius:4},{label:'Concluídas',data:linhas.map(l=>l.conc),backgroundColor:'#1f6f5c',borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'top',labels:{font:{size:11}}}},scales:{y:{beginAtZero:true,ticks:{font:{size:10}}},x:{ticks:{font:{size:10},maxRotation:35}}}},plugins:[chartDataLabels]});
 }
+
+// ===== Gestão de Férias por Período Aquisitivo =====
+$('nav-gferias').onclick=()=>showView('gferias');
+let gfFerias=[],gfExpandidos=new Set(),gfModalCtx={colab:null};
+
+async function openGFerias(){
+  const r=await db.from('ferias').select('*').order('data_inicio',{ascending:true});
+  gfFerias=r.error?[]:(r.data||[]);
+  renderGFerias();
+}
+
+function _gfIso(d){return d.toISOString().slice(0,10);}
+function _gfFmt(iso){if(!iso)return'—';const[y,m,d]=iso.split('-');return`${d}/${m}/${y}`;}
+function _gfDiasEntre(ini,fim){if(!ini||!fim)return 0;const a=new Date(ini+'T12:00'),b=new Date(fim+'T12:00');return Math.round((b-a)/86400000)+1;}
+function _gfAddYears(iso,n){const d=new Date(iso+'T12:00');d.setFullYear(d.getFullYear()+n);return _gfIso(d);}
+function _gfAddDays(iso,n){const d=new Date(iso+'T12:00');d.setDate(d.getDate()+n);return _gfIso(d);}
+
+function calcPeriodosAquisitivos(admissao,hoje){
+  if(!admissao)return[];
+  const hj=hoje||new Date();
+  const periodos=[];
+  let n=1;
+  while(true){
+    const inicio=_gfAddYears(admissao,n-1);
+    if(new Date(inicio+'T12:00')>hj)break;
+    const fim=_gfAddDays(_gfAddYears(admissao,n),-1);
+    const concessivoFim=_gfAddYears(fim,1);
+    periodos.push({numero:n,inicio,fim,concessivoFim,aquisitivoCompleto:new Date(fim+'T12:00')<=hj,gozos:[],diasGozados:0});
+    n++;if(n>25)break;
+  }
+  return periodos;
+}
+
+function atribuirGozosAosPeriodos(gozosColab,periodos){
+  // Cada gozo vai pro período aquisitivo mais antigo cujo concessivo cobre a data_inicio e ainda tem saldo (< 30)
+  const ord=[...gozosColab].sort((a,b)=>(a.data_inicio||'').localeCompare(b.data_inicio||''));
+  ord.forEach(g=>{
+    const dias=_gfDiasEntre(g.data_inicio,g.data_fim);
+    if(!dias)return;
+    // Prioriza períodos que tenham o concessivo cobrindo a data_inicio, em ordem cronológica
+    let alvo=periodos.find(p=>{
+      const cInicio=_gfAddDays(p.fim,1); // concessivo começa dia seguinte ao fim do aquisitivo
+      return cInicio<=g.data_inicio&&g.data_inicio<=p.concessivoFim&&(p.diasGozados+dias)<=30;
+    });
+    // Fallback: qualquer com saldo
+    if(!alvo)alvo=periodos.find(p=>p.diasGozados+dias<=30);
+    // Último fallback: o mais antigo (mesmo estourando)
+    if(!alvo)alvo=periodos[0];
+    if(alvo){alvo.gozos.push({...g,dias});alvo.diasGozados+=dias;}
+  });
+  return periodos;
+}
+
+function _gfStatusPeriodo(p,hoje){
+  const hj=hoje||new Date();
+  const vencido=new Date(p.concessivoFim+'T12:00')<hj&&p.diasGozados<30;
+  const diasParaVencer=Math.round((new Date(p.concessivoFim+'T12:00')-hj)/86400000);
+  if(p.diasGozados>=30)return{key:'completo',label:'✓ Totalmente gozado',cor:'#1f6f5c',diasParaVencer};
+  if(vencido)return{key:'vencido',label:'⚠ VENCIDO — saldo perdido/em risco',cor:'#a64141',diasParaVencer};
+  if(p.diasGozados>0)return{key:'parcial',label:'⏳ Parcial (saldo '+(30-p.diasGozados)+' dias)',cor:'#c97e2f',diasParaVencer};
+  return{key:'aberto',label:'🆕 Aberto (30 dias)',cor:'#4a5a8c',diasParaVencer};
+}
+
+function renderGFerias(){
+  const busca=($('gf-busca').value||'').toLowerCase().trim();
+  const soVenc=$('gf-vencendo-only').checked;
+  const ativos=equipe.filter(e=>!e.desligado).sort((a,b)=>(a.nome_curto||a.nome_completo||'').localeCompare(b.nome_curto||b.nome_completo||''));
+  const hoje=new Date();
+  let html='';
+  let total=0;
+  ativos.forEach(e=>{
+    const cn=e.nome_completo||e.nome_curto||'';
+    if(busca&&!cn.toLowerCase().includes(busca)&&!(e.nome_curto||'').toLowerCase().includes(busca))return;
+    const gozosColab=gfFerias.filter(f=>f.colaborador===cn);
+    const periodos=e.admissao?atribuirGozosAosPeriodos(gozosColab,calcPeriodosAquisitivos(e.admissao,hoje)):[];
+    const temVencendo=periodos.some(p=>{const s=_gfStatusPeriodo(p,hoje);return s.key==='parcial'||s.key==='aberto'?(s.diasParaVencer<=90&&s.diasParaVencer>=0):s.key==='vencido';});
+    if(soVenc&&!temVencendo)return;
+    total++;
+    const aberto=gfExpandidos.has(cn);
+    const admTxt=e.admissao?_gfFmt(e.admissao):'sem admissão cadastrada';
+    const alertBadge=temVencendo?' <span style="background:#a64141;color:#fff;padding:1px 8px;border-radius:10px;font-size:10px;margin-left:6px">⚠ atenção</span>':'';
+    html+=`<div class="gf-colab ${aberto?'open':''}" data-colab="${esc(cn)}">
+      <button class="gf-colab-head" onclick="gfToggle('${esc(cn).replace(/'/g,"\\'")}')">
+        <span><b>${esc(e.nome_curto||cn)}</b> <span style="color:var(--ink-soft);font-size:12px">(Admissão: ${esc(admTxt)})</span>${alertBadge}</span>
+        <span class="chev">›</span>
+      </button>
+      <div class="gf-colab-body">${aberto?_gfBodyHTML(e,periodos,hoje):''}</div>
+    </div>`;
+  });
+  if(!total)html='<div class="empty">Nenhum colaborador encontrado com os filtros atuais.</div>';
+  $('gf-lista').innerHTML=html;
+}
+function _gfBodyHTML(e,periodos,hoje){
+  const cn=e.nome_completo||e.nome_curto||'';
+  if(!e.admissao)return '<div class="empty" style="padding:10px 0">Cadastre a data de admissão do colaborador em Equipe pra calcular os períodos aquisitivos.</div>';
+  if(!periodos.length)return '<div class="empty" style="padding:10px 0">Nenhum período aquisitivo completado até hoje.</div>';
+  let h='';
+  periodos.forEach(p=>{
+    const st=_gfStatusPeriodo(p,hoje);
+    const saldo=30-p.diasGozados;
+    const gozosList=p.gozos.length?`<div class="gf-gozos"><b>Gozos registrados:</b><ul>${p.gozos.map(g=>`<li>${_gfFmt(g.data_inicio)} → ${_gfFmt(g.data_fim)} <b>(${g.dias} dias)</b>${g.observacao?' — <span style="color:var(--ink-soft);font-style:italic">'+esc(g.observacao)+'</span>':''}</li>`).join('')}</ul></div>`:'<div class="gf-gozos gf-empty-warn">Nenhum gozo registrado neste período.</div>';
+    const alertaVenc=(st.key==='parcial'||st.key==='aberto')&&st.diasParaVencer>=0&&st.diasParaVencer<=90?`<div style="margin-top:6px;padding:6px 10px;background:#fbf0e6;border-left:3px solid #c97e2f;border-radius:0 4px 4px 0;font-size:11.5px;color:#7a4e1f">⏰ Vence em ${st.diasParaVencer} dias — programar gozo com urgência</div>`:'';
+    h+=`<div class="gf-per ${st.key}">
+      <h4><span>Período aquisitivo ${p.numero}: ${_gfFmt(p.inicio)} → ${_gfFmt(p.fim)}</span> <span class="status-pill" style="background:${st.cor};color:#fff">${st.label}</span></h4>
+      <div class="datas">Concessivo até: <b>${_gfFmt(p.concessivoFim)}</b></div>
+      <div class="saldo">
+        <div>Direito: <b>30d</b></div>
+        <div>Gozado: <b style="color:#1f6f5c">${p.diasGozados}d</b></div>
+        <div>Saldo: <b style="color:${saldo>0?'#c97e2f':'#1f6f5c'}">${saldo}d</b></div>
+      </div>
+      ${alertaVenc}
+      ${gozosList}
+      ${saldo>0?`<div style="margin-top:10px"><button class="btn-primary" onclick="abrirGFModal('${esc(cn).replace(/'/g,"\\'")}',${p.numero},'${p.inicio}','${p.concessivoFim}',${saldo})" style="font-size:12px;padding:6px 12px">+ Registrar gozo neste período</button></div>`:''}
+    </div>`;
+  });
+  return h;
+}
+function gfToggle(cn){
+  if(gfExpandidos.has(cn))gfExpandidos.delete(cn);else gfExpandidos.add(cn);
+  renderGFerias();
+}
+function gfExpandirTodos(abrir){
+  const ativos=equipe.filter(e=>!e.desligado);
+  if(abrir)ativos.forEach(e=>gfExpandidos.add(e.nome_completo||e.nome_curto||''));
+  else gfExpandidos.clear();
+  renderGFerias();
+}
+function abrirGFModal(colab,periodoNum,periodoInicio,concessivoFim,saldo){
+  gfModalCtx={colab,periodoNum,concessivoFim,saldo};
+  $('gf-modal-info').innerHTML=`<b>${esc(colab)}</b> · Período aquisitivo ${periodoNum} · Saldo: <b>${saldo} dias</b> · Concessivo vence em ${_gfFmt(concessivoFim)}`;
+  // Sugere início: hoje ou início do concessivo (o que for maior)
+  const hoje=_gfIso(new Date());
+  const cInicio=_gfAddDays(_gfAddYears(periodoInicio,1),-1); // fim do aquisitivo = início do concessivo -1
+  const sugIni=hoje>cInicio?hoje:cInicio;
+  $('gf-m-ini').value=sugIni;
+  $('gf-m-fim').value='';
+  $('gf-m-diascalc').value='0';
+  $('gf-m-obs').value='';
+  $('gf-modal-bg').style.display='flex';
+  setTimeout(()=>$('gf-m-ini').focus(),80);
+}
+function fecharGFModal(){$('gf-modal-bg').style.display='none';gfModalCtx={colab:null};}
+function _gfSetDias(n){
+  const ini=$('gf-m-ini').value;if(!ini){alert('Escolha a data de início primeiro.');return;}
+  const fim=_gfAddDays(ini,n-1);
+  $('gf-m-fim').value=fim;
+  $('gf-m-diascalc').value=n;
+}
+function _gfRecalcFim(){
+  const ini=$('gf-m-ini').value,fim=$('gf-m-fim').value;
+  $('gf-m-diascalc').value=(ini&&fim)?_gfDiasEntre(ini,fim):0;
+}
+// Recalcula dias sempre que muda data fim
+document.addEventListener('DOMContentLoaded',()=>{const el=$('gf-m-fim');if(el)el.addEventListener('change',_gfRecalcFim);});
+
+async function salvarGozoFerias(){
+  if(!gfModalCtx.colab)return;
+  const ini=$('gf-m-ini').value,fim=$('gf-m-fim').value;
+  if(!ini||!fim){alert('Preencha data início e fim.');return;}
+  if(fim<ini){alert('Data fim deve ser igual ou depois da data início.');return;}
+  const dias=_gfDiasEntre(ini,fim);
+  if(dias>gfModalCtx.saldo){
+    if(!confirm(`Este gozo tem ${dias} dias mas o saldo do período é ${gfModalCtx.saldo}. Salvar mesmo assim? (O excedente será atribuído a outro período aquisitivo automaticamente.)`))return;
+  }
+  const dados={colaborador:gfModalCtx.colab,data_inicio:ini,data_fim:fim,observacao:$('gf-m-obs').value.trim()||null};
+  const{error}=await db.from('ferias').insert(dados);
+  if(error){alert('Erro ao salvar: '+error.message);return;}
+  toast('✓ Gozo registrado');
+  fecharGFModal();
+  await openGFerias();
+}
+// Bind manual do input de data fim (o listener no DOMContentLoaded pode não pegar se já carregou)
+setTimeout(()=>{const el=$('gf-m-fim');if(el&&!el._bound){el.addEventListener('change',_gfRecalcFim);el._bound=true;}},500);
 $('nav-meusinsat').onclick=()=>showView('meusinsat');
 
 // ===== Insatisfeitos: state + helpers =====
