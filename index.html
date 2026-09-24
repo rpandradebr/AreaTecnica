@@ -2357,7 +2357,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v117';
+const APP_VERSION='v118';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -2909,10 +2909,13 @@ function diasFeria(f){if(!f.data_inicio||!f.data_fim)return'';const d=Math.round
 const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
 function fillColabSelect(){
   const nomes=new Set();
-  maquinas.forEach(m=>{if(m.colaborador&&norm(m.setor)==='area tecnica')nomes.add(m.colaborador);});
-  ferias.forEach(f=>{if(f.colaborador)nomes.add(f.colaborador);});
+  // Prioriza os nomes cadastrados em Equipe (ativos)
+  equipe.filter(e=>!e.desligado).forEach(e=>{if(e.nome_completo)nomes.add(e.nome_completo);});
+  // Adiciona nomes vindos de máquinas/férias, normalizados pra o canônico da equipe
+  maquinas.forEach(m=>{if(m.colaborador&&norm(m.setor)==='area tecnica'){const c=_gfNomeCanonico(m.colaborador);nomes.add(c||m.colaborador);}});
+  ferias.forEach(f=>{if(f.colaborador){const c=_gfNomeCanonico(f.colaborador);nomes.add(c||f.colaborador);}});
   const sel=$('fe-colab'),cur=sel.value;
-  sel.innerHTML='<option value="">— selecione —</option>'+[...nomes].sort().map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  sel.innerHTML='<option value="">— selecione —</option>'+[...nomes].sort((a,b)=>a.localeCompare(b,'pt-BR')).map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
   if(cur)sel.value=cur;
 }
 async function openFerias(){
@@ -2924,16 +2927,17 @@ function renderFerias(){
   $('fe-c-agora').textContent=ferias.filter(f=>statusFeria(f)==='Em férias').length;
   $('fe-c-agend').textContent=ferias.filter(f=>statusFeria(f)==='Agendada').length;
   $('fe-c-conc').textContent=ferias.filter(f=>statusFeria(f)==='Concluída').length;
-  // popular filtro de técnico (mantém seleção atual)
-  const selT=$('fe-ftec'),curT=selT.value,nomes=[...new Set(ferias.map(f=>f.colaborador).filter(Boolean))].sort();
-  selT.innerHTML='<option value="">Todos os técnicos</option>'+nomes.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  // popular filtro de técnico (normalizando nomes divergentes ao canônico)
+  const selT=$('fe-ftec'),curT=selT.value,nomesRaw=[...new Set(ferias.map(f=>_gfNomeCanonico(f.colaborador)||f.colaborador).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+  selT.innerHTML='<option value="">Todos os técnicos</option>'+nomesRaw.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
   if(curT)selT.value=curT;
   const q=$('fe-busca').value.trim().toLowerCase(),fst=$('fe-fstatus').value,fmes=parseInt($('fe-fmes').value)||0,ftec=$('fe-ftec').value;
   const hoje=new Date();hoje.setHours(0,0,0,0);
   const tres=new Date(hoje);tres.setMonth(tres.getMonth()+3);
   const arr=ferias.filter(f=>{
-    if(q&&!(f.colaborador||'').toLowerCase().includes(q))return false;
-    if(ftec&&f.colaborador!==ftec)return false;
+    const nomeCan=_gfNomeCanonico(f.colaborador)||f.colaborador||'';
+    if(q&&!nomeCan.toLowerCase().includes(q))return false;
+    if(ftec&&nomeCan!==ftec)return false;
     const st=statusFeria(f);
     if(fst==='agora'&&st!=='Em férias')return false;
     if(fst==='agendada'&&st!=='Agendada')return false;
@@ -2942,9 +2946,9 @@ function renderFerias(){
     if(fmes){if(!f.data_inicio)return false;const mi=new Date(f.data_inicio+'T00:00').getMonth()+1,mf=f.data_fim?new Date(f.data_fim+'T00:00').getMonth()+1:mi;if(mi!==fmes&&mf!==fmes)return false;}
     return true;
   });
-  $('fe-lista').innerHTML=arr.length?arr.map(f=>{const st=statusFeria(f);return`
+  $('fe-lista').innerHTML=arr.length?arr.map(f=>{const st=statusFeria(f);const nomeExib=_gfNomeCanonico(f.colaborador)||f.colaborador;return`
     <div class="row-item" style="cursor:default;align-items:flex-start">
-      <div><div class="ri-main">${esc(f.colaborador)}</div>
+      <div><div class="ri-main">${esc(nomeExib)}</div>
       <div class="ri-sub">${f.data_inicio?fmt(f.data_inicio):'?'} → ${f.data_fim?fmt(f.data_fim):'?'}${diasFeria(f)?' · '+diasFeria(f):''}</div>
       ${f.observacao?`<div class="ri-sub" style="margin-top:4px">${esc(f.observacao)}</div>`:''}</div>
       <div style="display:flex;align-items:center;gap:10px">
@@ -2954,10 +2958,11 @@ function renderFerias(){
     </div>`;}).join(''):'<div class="empty">Nenhuma férias lançada ainda.</div>';
 }
 async function onSaveFeria(){
-  const colaborador=$('fe-colab').value.trim(),di=$('fe-ini').value,df=$('fe-fim').value;
-  if(!colaborador){alert('Informe o colaborador.');return;}
+  const colabRaw=$('fe-colab').value.trim(),di=$('fe-ini').value,df=$('fe-fim').value;
+  if(!colabRaw){alert('Informe o colaborador.');return;}
   if(!di||!df){alert('Informe início e fim.');return;}
   if(df<di){alert('A data fim não pode ser antes do início.');return;}
+  const colaborador=_gfNomeCanonico(colabRaw)||colabRaw;
   const dados={colaborador,data_inicio:di,data_fim:df,observacao:$('fe-obs').value.trim()};
   $('fe-save').disabled=true;
   let error;
