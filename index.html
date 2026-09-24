@@ -1815,7 +1815,7 @@
           <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;margin:0"><input type="checkbox" id="gf-vencendo-only" onchange="renderGFerias()" style="width:16px;height:16px">Só quem tem período vencendo em 90 dias</label>
           <button class="btn-edit" onclick="gfExpandirTodos(true)" style="font-size:12px;padding:6px 10px">Expandir todos</button>
           <button class="btn-edit" onclick="gfExpandirTodos(false)" style="font-size:12px;padding:6px 10px">Recolher todos</button>
-          <button onclick="gfLimparDuplicatas()" style="font-size:12px;padding:6px 10px;background:#fbf4f4;border:1px solid #d9b0b0;color:#5f1e1e;border-radius:6px;cursor:pointer;font-family:inherit" title="Detecta e remove gozos duplicados (mesmo colab + mesmas datas)">🧹 Limpar duplicatas</button>
+          <button onclick="gfLimparDuplicatas()" style="font-size:12px;padding:6px 10px;background:#fbf4f4;border:1px solid #d9b0b0;color:#5f1e1e;border-radius:6px;cursor:pointer;font-family:inherit" title="Padroniza nomes divergentes e remove gozos duplicados">🧹 Consolidar</button>
         </div>
         <div id="gf-lista"></div>
       </div>
@@ -1848,6 +1848,22 @@
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
         <button class="btn-edit" onclick="fecharGFModal()">Cancelar</button>
         <button class="btn-primary" onclick="salvarGozoFerias()">Salvar gozo</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: análise de consolidação -->
+  <div id="gf-cons-bg" class="modal-bg" style="display:none" onclick="if(event.target===this)_gfConsFechar()">
+    <div class="modal-card" style="max-width:780px;max-height:88vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+      <div style="font-size:17px;font-weight:600;margin-bottom:4px">🔎 Análise de consolidação</div>
+      <div style="font-size:12px;color:var(--ink-soft);margin-bottom:12px">Confira os casos detectados. Desmarque qualquer item duvidoso antes de consolidar.</div>
+      <div id="gf-cons-body" style="flex:1;overflow-y:auto;padding-right:4px"></div>
+      <div style="display:flex;justify-content:space-between;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);align-items:center">
+        <div style="font-size:11.5px;color:var(--ink-soft)"><span id="gf-cons-contador"></span></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn-edit" onclick="_gfConsFechar()">Cancelar</button>
+          <button class="btn-primary" onclick="_gfConsExecutar()" id="gf-cons-btn-exec">Consolidar selecionados</button>
+        </div>
       </div>
     </div>
   </div>
@@ -2341,7 +2357,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v115';
+const APP_VERSION='v117';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -6561,6 +6577,40 @@ function gfSetSubTab(nome){
   renderGFerias();
 }
 
+function _gfNomeCanonico(nome){
+  if(!nome)return nome;
+  const n=nome.trim().toLowerCase();
+  if(!n)return nome;
+  // Match exato com nome_completo
+  let e=equipe.find(x=>((x.nome_completo||'').trim().toLowerCase())===n);
+  if(e&&e.nome_completo)return e.nome_completo;
+  // Match exato com nome_curto
+  e=equipe.find(x=>((x.nome_curto||'').trim().toLowerCase())===n);
+  if(e)return e.nome_completo||e.nome_curto||nome;
+  // Match parcial: primeiro + último nome (ignorando meio)
+  const partes=n.split(/\s+/).filter(Boolean);
+  if(partes.length>=2){
+    const pri=partes[0],ult=partes[partes.length-1];
+    e=equipe.find(x=>{
+      const nc=(x.nome_completo||'').trim().toLowerCase();
+      if(!nc)return false;
+      const pp=nc.split(/\s+/).filter(Boolean);
+      return pp.length>=2&&pp[0]===pri&&pp[pp.length-1]===ult;
+    });
+    if(e)return e.nome_completo||nome;
+    // Só primeiro nome bate e é único
+    e=equipe.filter(x=>{
+      const nc=(x.nome_completo||'').trim().toLowerCase();
+      const pp=nc.split(/\s+/).filter(Boolean);
+      return pp[0]===pri;
+    });
+    if(e.length===1)return e[0].nome_completo||nome;
+  }
+  return nome;
+}
+function _gfNormalizaGozos(arr){
+  return arr.map(g=>({...g,colaborador:_gfNomeCanonico(g.colaborador)}));
+}
 function _gfDedupeGozos(arr){
   const seen=new Set(),out=[];
   const ord=[...arr].sort((a,b)=>{
@@ -6580,36 +6630,125 @@ async function openGFerias(){
     db.from('solicitacoes_ferias').select('*').in('status',['Pendente','Aprovada'])
   ]);
   const rawFer=r.error?[]:(r.data||[]);
-  gfFerias=_gfDedupeGozos(rawFer);
+  gfFerias=_gfDedupeGozos(_gfNormalizaGozos(rawFer));
   gfSolicitacoes=rs.error?[]:(rs.data||[]);
   gfSetSubTab(gfSubTabAtual);
 }
+let gfConsCtx={renomeacoes:[],duplicatas:[]};
 async function gfLimparDuplicatas(){
   const r=await db.from('ferias').select('*');
   if(r.error){alert('Erro ao consultar: '+r.error.message);return;}
   const raw=r.data||[];
+  // Detecta renomeações: registros cujo nome atual não é canônico
+  // Agrupa por (nome_original → nome_canonico) pra listar de forma agregada
+  const renomAgg={};
+  raw.forEach(g=>{
+    const canonico=_gfNomeCanonico(g.colaborador);
+    if(canonico&&canonico!==g.colaborador){
+      const key=`${g.colaborador}|||${canonico}`;
+      if(!renomAgg[key])renomAgg[key]={de:g.colaborador,para:canonico,ids:[]};
+      renomAgg[key].ids.push(g.id);
+    }
+  });
+  const renomeacoes=Object.values(renomAgg).sort((a,b)=>b.ids.length-a.ids.length);
+  // Detecta duplicatas usando nome já normalizado como chave
   const grupos={};
   raw.forEach(g=>{
-    const key=`${g.colaborador||''}|${g.data_inicio||''}|${g.data_fim||''}`;
+    const nome=_gfNomeCanonico(g.colaborador)||g.colaborador||'';
+    const key=`${nome}|${g.data_inicio||''}|${g.data_fim||''}`;
     (grupos[key]=grupos[key]||[]).push(g);
   });
-  const dups=Object.values(grupos).filter(arr=>arr.length>1);
-  if(!dups.length){alert('✓ Nenhuma duplicata encontrada no banco.');return;}
-  const idsDeletar=[];
-  const detalhes=[];
-  dups.forEach(arr=>{
+  const duplicatas=Object.values(grupos).filter(arr=>arr.length>1).map(arr=>{
     const ord=[...arr].sort((a,b)=>(a.id||'').localeCompare(b.id||''));
     const manter=ord[0];
     const remover=ord.slice(1);
-    detalhes.push(`• ${manter.colaborador} · ${_gfFmt(manter.data_inicio)} → ${_gfFmt(manter.data_fim)}: ${arr.length} registros (${remover.length} extra)`);
-    remover.forEach(g=>idsDeletar.push(g.id));
-  });
-  const preview=detalhes.slice(0,10).join('\n')+(detalhes.length>10?`\n... e mais ${detalhes.length-10} grupo(s)`:'');
-  const msg=`Foram encontrados ${dups.length} grupo(s) de duplicatas, totalizando ${idsDeletar.length} registro(s) extra(s):\n\n${preview}\n\nSerá mantido o registro mais antigo de cada grupo e os outros serão excluídos.\n\nAção irreversível. Confirmar?`;
-  if(!confirm(msg))return;
-  const {error}=await db.from('ferias').delete().in('id',idsDeletar);
-  if(error){alert('Erro ao deletar: '+error.message);return;}
-  toast(`✓ ${idsDeletar.length} duplicata(s) removida(s)`);
+    const nomeCan=_gfNomeCanonico(manter.colaborador)||manter.colaborador;
+    const nomesOrig=[...new Set(arr.map(g=>g.colaborador).filter(Boolean))];
+    return{nomeCan,dataIni:manter.data_inicio,dataFim:manter.data_fim,manter:manter.id,remover:remover.map(g=>g.id),nomesOrig,total:arr.length};
+  }).sort((a,b)=>(a.dataIni||'').localeCompare(b.dataIni||''));
+  if(!renomeacoes.length&&!duplicatas.length){
+    alert('✓ Nada a consolidar. Todos os nomes já estão canônicos e não há duplicatas.');
+    return;
+  }
+  gfConsCtx={renomeacoes,duplicatas};
+  _gfConsRender();
+  $('gf-cons-bg').style.display='flex';
+}
+function _gfConsFechar(){$('gf-cons-bg').style.display='none';}
+function _gfConsRender(){
+  const{renomeacoes,duplicatas}=gfConsCtx;
+  let h='';
+  if(renomeacoes.length){
+    h+=`<div style="background:#fbf0e6;border-left:4px solid #c97e2f;border-radius:0 6px 6px 0;padding:10px 14px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:12px;font-weight:700;color:#7a4e1f;text-transform:uppercase;letter-spacing:.04em">📝 Renomeações sugeridas (${renomeacoes.length})</div>
+        <div style="font-size:11px"><label style="display:inline-flex;gap:4px;align-items:center;cursor:pointer;color:#5f3e15"><input type="checkbox" checked onchange="_gfConsToggleAll('ren',this.checked)" style="width:14px;height:14px">Marcar todos</label></div>
+      </div>
+      <div style="font-size:11.5px;color:#5f3e15;margin-bottom:8px">Nomes divergentes que serão substituídos pelo nome cadastrado em Equipe:</div>
+      ${renomeacoes.map((r,i)=>`<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 8px;background:#fff;border:1px solid #d9b489;border-radius:4px;margin-bottom:4px;cursor:pointer;font-size:12px">
+        <input type="checkbox" checked class="gf-cons-ren" data-idx="${i}" style="width:15px;height:15px;margin-top:2px">
+        <div style="flex:1"><b>"${esc(r.de)}"</b> → <b style="color:#175547">"${esc(r.para)}"</b> <span style="color:var(--ink-soft);font-size:11px">(${r.ids.length} registro${r.ids.length>1?'s':''})</span></div>
+      </label>`).join('')}
+    </div>`;
+  }
+  if(duplicatas.length){
+    const totalExtras=duplicatas.reduce((s,d)=>s+d.remover.length,0);
+    h+=`<div style="background:#fbf4f4;border-left:4px solid #a64141;border-radius:0 6px 6px 0;padding:10px 14px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:12px;font-weight:700;color:#5f1e1e;text-transform:uppercase;letter-spacing:.04em">🗑 Duplicatas detectadas (${duplicatas.length} grupos · ${totalExtras} extras)</div>
+        <div style="font-size:11px"><label style="display:inline-flex;gap:4px;align-items:center;cursor:pointer;color:#5f1e1e"><input type="checkbox" checked onchange="_gfConsToggleAll('dup',this.checked)" style="width:14px;height:14px">Marcar todos</label></div>
+      </div>
+      <div style="font-size:11.5px;color:#5f1e1e;margin-bottom:8px">Registros com mesma pessoa e mesmas datas. Será mantido o mais antigo, os outros excluídos:</div>
+      ${duplicatas.map((d,i)=>{
+        const dicaNomes=d.nomesOrig.length>1?`<div style="font-size:10.5px;color:var(--ink-soft);font-style:italic;margin-top:2px">nomes originais: ${d.nomesOrig.map(n=>esc(n)).join(' · ')}</div>`:'';
+        return `<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 8px;background:#fff;border:1px solid #d9b0b0;border-radius:4px;margin-bottom:4px;cursor:pointer;font-size:12px">
+          <input type="checkbox" checked class="gf-cons-dup" data-idx="${i}" style="width:15px;height:15px;margin-top:2px">
+          <div style="flex:1"><b>${esc(d.nomeCan)}</b> · ${_gfFmt(d.dataIni)} → ${_gfFmt(d.dataFim)} <span style="color:var(--ink-soft);font-size:11px">(${d.total} registros, deletar ${d.remover.length})</span>${dicaNomes}</div>
+        </label>`;
+      }).join('')}
+    </div>`;
+  }
+  $('gf-cons-body').innerHTML=h;
+  _gfConsAtualizaContador();
+}
+function _gfConsToggleAll(tipo,checked){
+  document.querySelectorAll('.gf-cons-'+tipo).forEach(cb=>{cb.checked=checked;});
+  _gfConsAtualizaContador();
+}
+function _gfConsAtualizaContador(){
+  const rens=[...document.querySelectorAll('.gf-cons-ren:checked')].length;
+  const dups=[...document.querySelectorAll('.gf-cons-dup:checked')].length;
+  $('gf-cons-contador').textContent=`${rens} renomeação(ões) e ${dups} grupo(s) de duplicatas selecionados`;
+}
+document.addEventListener('change',ev=>{if(ev.target&&(ev.target.classList.contains('gf-cons-ren')||ev.target.classList.contains('gf-cons-dup')))_gfConsAtualizaContador();});
+async function _gfConsExecutar(){
+  const rensSel=[...document.querySelectorAll('.gf-cons-ren:checked')].map(cb=>gfConsCtx.renomeacoes[parseInt(cb.dataset.idx)]);
+  const dupsSel=[...document.querySelectorAll('.gf-cons-dup:checked')].map(cb=>gfConsCtx.duplicatas[parseInt(cb.dataset.idx)]);
+  if(!rensSel.length&&!dupsSel.length){alert('Nada selecionado.');return;}
+  const totalRen=rensSel.reduce((s,r)=>s+r.ids.length,0);
+  const totalDel=dupsSel.reduce((s,d)=>s+d.remover.length,0);
+  if(!confirm(`Confirmar consolidação?\n\n• ${totalRen} registro(s) serão renomeados\n• ${totalDel} duplicata(s) serão excluídos\n\nAção irreversível.`))return;
+  const btn=$('gf-cons-btn-exec');
+  btn.disabled=true;const tx=btn.textContent;btn.textContent='Processando...';btn.style.opacity='0.7';
+  let erros=[];
+  try{
+    // Renomeações: UPDATE em batch por grupo (mesmo par de/para)
+    for(const r of rensSel){
+      const{error}=await db.from('ferias').update({colaborador:r.para}).in('id',r.ids);
+      if(error)erros.push(`Renomear "${r.de}": ${error.message}`);
+    }
+    // Duplicatas
+    const idsDel=dupsSel.flatMap(d=>d.remover);
+    if(idsDel.length){
+      const{error}=await db.from('ferias').delete().in('id',idsDel);
+      if(error)erros.push(`Deletar duplicatas: ${error.message}`);
+    }
+  }finally{
+    btn.disabled=false;btn.textContent=tx;btn.style.opacity='';
+  }
+  if(erros.length)alert('Alguns erros ocorreram:\n\n'+erros.slice(0,5).join('\n'));
+  else toast(`✓ Consolidação concluída: ${totalRen} renomeado(s), ${totalDel} duplicata(s) removida(s)`);
+  _gfConsFechar();
   await openGFerias();
 }
 
