@@ -1728,7 +1728,15 @@
       .gf-colab.open .gf-colab-head .chev{transform:rotate(90deg)}
       .gf-colab-body{display:none;padding:0 16px 16px}
       .gf-colab.open .gf-colab-body{display:block}
-      .gf-per{background:#fff;border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-bottom:10px}
+      .gf-per{background:#fff;border:1px solid var(--line);border-radius:6px;padding:0;margin-bottom:10px;overflow:hidden}
+      .gf-per-head{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 14px;cursor:pointer;background:transparent;border:none;width:100%;text-align:left;font-family:inherit;font-size:inherit;color:inherit;transition:background .15s}
+      .gf-per-head:hover{background:rgba(0,0,0,.03)}
+      .gf-per-head-titulo{flex:1;font-size:13px;font-weight:600}
+      .gf-per-head-resumo{font-size:11px;color:var(--ink-soft);white-space:nowrap}
+      .gf-per-head .chev{color:var(--ink-soft);transition:transform .18s;font-size:14px;flex-shrink:0}
+      .gf-per[data-per-open="1"] .gf-per-head .chev{transform:rotate(90deg)}
+      .gf-per-body{padding:0 14px 14px;display:none}
+      .gf-per[data-per-open="1"] .gf-per-body{display:block}
       .gf-per.completo{border-left:4px solid #1f6f5c}
       .gf-per.agendado-total{border-left:4px solid #2c7a5e;background:linear-gradient(to right,#f0f7f2 0%,#fff 100%)}
       .gf-per.so-agendado{border-left:4px solid #4a5a8c;background:linear-gradient(to right,#f2f4fa 0%,#fff 100%)}
@@ -2300,7 +2308,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v108';
+const APP_VERSION='v109';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -6615,6 +6623,8 @@ function _gfBodyHTML(e,periodos,hoje){
     const st=_gfStatusPeriodo(p,hoje);
     const efetivoOuComprometido=p.diasRealizados+p.diasEmAndamento+p.diasAgendados;
     const saldo=30-efetivoOuComprometido;
+    // Padrão: abre períodos com pendência; fecha os resolvidos (completo, agendado-total)
+    const aberto=st.key!=='completo'&&st.key!=='agendado-total';
     const badgeGozo=g=>{
       if(g.estado==='realizado')return '<span class="gf-gozo-badge realizado">✓ Realizado</span>';
       if(g.estado==='agendado')return '<span class="gf-gozo-badge agendado">📅 Agendado</span>';
@@ -6624,22 +6634,35 @@ function _gfBodyHTML(e,periodos,hoje){
     const gozosOrdenados=[...p.gozos].sort((a,b)=>(a.data_inicio||'').localeCompare(b.data_inicio||''));
     const gozosList=p.gozos.length?`<div class="gf-gozos"><b>Gozos:</b><ul>${gozosOrdenados.map(g=>`<li>${_gfFmt(g.data_inicio)} → ${_gfFmt(g.data_fim)} <b>(${g.dias}d)</b>${badgeGozo(g)}${g.observacao?' — <span style="color:var(--ink-soft);font-style:italic">'+esc(g.observacao)+'</span>':''}</li>`).join('')}</ul></div>`:'<div class="gf-gozos gf-empty-warn">Nenhum gozo registrado neste período.</div>';
     const alertaVenc=(st.key==='parcial'||st.key==='aberto'||st.key==='so-agendado')&&saldo>0&&st.diasParaVencer>=0&&st.diasParaVencer<=90?`<div style="margin-top:6px;padding:6px 10px;background:#fbf0e6;border-left:3px solid #c97e2f;border-radius:0 4px 4px 0;font-size:11.5px;color:#7a4e1f">⏰ Vence em ${st.diasParaVencer} dias — programar gozo com urgência</div>`:'';
-    // Breakdown do saldo — só mostra as linhas com valor > 0
     const linhasSaldo=[`<div>Direito: <b>30d</b></div>`];
     if(p.diasRealizados>0)linhasSaldo.push(`<div>✓ Realizado: <b style="color:#175547">${p.diasRealizados}d</b></div>`);
     if(p.diasEmAndamento>0)linhasSaldo.push(`<div>🔄 Em andamento: <b style="color:#7a4e1f">${p.diasEmAndamento}d</b></div>`);
     if(p.diasAgendados>0)linhasSaldo.push(`<div>📅 Agendado: <b style="color:#2b3a63">${p.diasAgendados}d</b></div>`);
     linhasSaldo.push(`<div>Saldo a programar: <b style="color:${saldo>0?'#c97e2f':'#1f6f5c'}">${saldo}d</b></div>`);
-    h+=`<div class="gf-per ${st.key}">
-      <h4><span>Período aquisitivo ${p.numero}: ${_gfFmt(p.inicio)} → ${_gfFmt(p.fim)}</span> <span class="status-pill" style="background:${st.cor};color:#fff">${st.label}</span></h4>
-      <div class="datas">Concessivo até: <b>${_gfFmt(p.concessivoFim)}</b></div>
-      <div class="saldo">${linhasSaldo.join('')}</div>
-      ${alertaVenc}
-      ${gozosList}
-      ${saldo>0?`<div style="margin-top:10px"><button class="btn-primary" onclick="abrirGFModal('${esc(cn).replace(/'/g,"\\'")}',${p.numero},'${p.inicio}','${p.concessivoFim}',${saldo})" style="font-size:12px;padding:6px 12px">+ Registrar gozo neste período</button></div>`:''}
+    const inicioConcessivo=_gfAddDays(p.fim,1);
+    h+=`<div class="gf-per ${st.key}" data-per-open="${aberto?1:0}">
+      <button class="gf-per-head" onclick="gfTogglePer(this.parentElement)">
+        <span class="gf-per-head-titulo">Período ${p.numero}: ${_gfFmt(p.inicio)} → ${_gfFmt(p.fim)}</span>
+        <span class="status-pill" style="background:${st.cor};color:#fff">${st.label}</span>
+        <span class="gf-per-head-resumo">saldo <b style="color:${saldo>0?'#c97e2f':'#1f6f5c'}">${saldo}d</b></span>
+        <span class="chev">›</span>
+      </button>
+      <div class="gf-per-body">
+        <div class="datas" style="line-height:1.6">
+          <div>📅 <b>Férias permitidas a partir de:</b> ${_gfFmt(inicioConcessivo)}</div>
+          <div>⏱ <b>Concessivo até:</b> ${_gfFmt(p.concessivoFim)}</div>
+        </div>
+        <div class="saldo">${linhasSaldo.join('')}</div>
+        ${alertaVenc}
+        ${gozosList}
+        ${saldo>0?`<div style="margin-top:10px"><button class="btn-primary" onclick="event.stopPropagation();abrirGFModal('${esc(cn).replace(/'/g,"\\'")}',${p.numero},'${p.inicio}','${p.concessivoFim}',${saldo})" style="font-size:12px;padding:6px 12px">+ Registrar gozo neste período</button></div>`:''}
+      </div>
     </div>`;
   });
   return h;
+}
+function gfTogglePer(el){
+  el.dataset.perOpen=el.dataset.perOpen==='1'?'0':'1';
 }
 function gfToggle(cn){
   if(gfExpandidos.has(cn))gfExpandidos.delete(cn);else gfExpandidos.add(cn);
