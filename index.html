@@ -1747,6 +1747,21 @@
       .gf-gozo-badge.realizado{background:#dfebe0;color:#175547}
       .gf-gozo-badge.agendado{background:#e6ecf5;color:#2b3a63}
       .gf-gozo-badge.andamento{background:#fbf0e6;color:#7a4e1f}
+      .gf-card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column}
+      .gf-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:6px}
+      .gf-card-titulo{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-soft);font-weight:700}
+      .gf-card-num{font-family:var(--display);font-size:22px;font-weight:600;line-height:1;color:#175547}
+      .gf-card-lista{list-style:none;padding:0;margin:0;max-height:220px;overflow-y:auto}
+      .gf-card-lista li{font-size:12px;padding:6px 4px;border-bottom:1px solid #f0ede4;cursor:pointer;display:flex;justify-content:space-between;gap:6px;align-items:center}
+      .gf-card-lista li:hover{background:#faf8f2}
+      .gf-card-lista li:last-child{border:none}
+      .gf-card-empty{font-size:11.5px;color:var(--ink-soft);font-style:italic;padding:12px 4px;text-align:center}
+      .gf-card-sub{font-size:10.5px;color:var(--ink-soft);font-weight:400;white-space:nowrap}
+      .gf-card select{font-size:11px;padding:2px 6px;border:1px solid var(--line);border-radius:4px;background:#fff}
+      .gf-card-c-vermelho .gf-card-num{color:#a64141}
+      .gf-card-c-laranja .gf-card-num{color:#c97e2f}
+      .gf-card-c-azul .gf-card-num{color:#4a5a8c}
+      .gf-card-c-verde .gf-card-num{color:#175547}
       .gf-per h4{margin:0 0 6px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:8px}
       .gf-per .datas{font-size:11.5px;color:var(--ink-soft)}
       .gf-per .saldo{display:flex;gap:14px;flex-wrap:wrap;margin:8px 0;font-size:12px}
@@ -1785,6 +1800,7 @@
         <button class="btn-edit" onclick="gfExpandirTodos(true)" style="font-size:12px;padding:6px 10px">Expandir todos</button>
         <button class="btn-edit" onclick="gfExpandirTodos(false)" style="font-size:12px;padding:6px 10px">Recolher todos</button>
       </div>
+      <div id="gf-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:14px"></div>
       <div id="gf-alertas-panel" style="margin-bottom:14px"></div>
       <div id="gf-lista"></div>
     </div>
@@ -2308,7 +2324,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v110';
+const APP_VERSION='v111';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -6585,6 +6601,7 @@ function _gfStatusPeriodo(p,hoje){
 }
 
 function renderGFerias(){
+  gfRenderCards();
   gfRenderAlertas();
   const busca=($('gf-busca').value||'').toLowerCase().trim();
   const soVenc=$('gf-vencendo-only').checked;
@@ -6770,6 +6787,110 @@ function gfIrPraColab(colab){
     const el=document.querySelector(`[data-colab="${colab.replace(/"/g,'\\"')}"]`);
     if(el)el.scrollIntoView({behavior:'smooth',block:'start'});
   },100);
+}
+
+// ===== Cards laterais no topo da aba =====
+let gfMesFiltro=null;
+function _gfShort(nome){const p=(nome||'').trim().split(' ');return p.length>1?p[0]+' '+p[1].slice(0,3)+'.':(nome||'');}
+function gfRenderCards(){
+  const hoje=new Date();
+  const hjIso=_gfIso(hoje);
+  const anoAtual=hoje.getFullYear();
+  const mesAtual=hoje.getMonth()+1;
+  if(gfMesFiltro==null)gfMesFiltro=mesAtual;
+  const ativos=equipe.filter(e=>!e.desligado);
+  // Enriquece dados de cada colab
+  const dados=ativos.map(e=>{
+    const cn=e.nome_completo||e.nome_curto||'';
+    const gozos=gfFerias.filter(f=>f.colaborador===cn);
+    const periodos=e.admissao?atribuirGozosAosPeriodos(gozos,calcPeriodosAquisitivos(e.admissao,hoje)):[];
+    return{colab:e,cn,gozos,periodos};
+  });
+
+  // ===== Card 1: aquisitivo próximo a vencer =====
+  const vencendo=[];
+  dados.forEach(d=>{
+    d.periodos.forEach(p=>{
+      const st=_gfStatusPeriodo(p,hoje);
+      const efetivo=p.diasRealizados+p.diasEmAndamento+p.diasAgendados;
+      const saldo=30-efetivo;
+      if(saldo>0&&st.diasParaVencer>=0&&st.diasParaVencer<=90){
+        vencendo.push({colab:d.colab,cn:d.cn,per:p,dias:st.diasParaVencer,saldo});
+      }
+    });
+  });
+  vencendo.sort((a,b)=>a.dias-b.dias);
+
+  // ===== Card 2: próximas férias (agendadas a partir de hoje) =====
+  const proximas=gfFerias
+    .filter(f=>f.data_inicio&&f.data_inicio>=hjIso)
+    .map(f=>({...f,dias:_gfDiasEntre(f.data_inicio,f.data_fim)}))
+    .sort((a,b)=>a.data_inicio.localeCompare(b.data_inicio));
+
+  // ===== Card 3: férias no mês selecionado =====
+  const primeiroDia=new Date(anoAtual,gfMesFiltro-1,1);
+  const ultimoDia=new Date(anoAtual,gfMesFiltro,0,23,59,59);
+  const noMes=gfFerias.filter(f=>{
+    if(!f.data_inicio||!f.data_fim)return false;
+    const ini=new Date(f.data_inicio+'T12:00'),fim=new Date(f.data_fim+'T12:00');
+    return !(fim<primeiroDia||ini>ultimoDia);
+  }).map(f=>({...f,dias:_gfDiasEntre(f.data_inicio,f.data_fim)}))
+    .sort((a,b)=>a.data_inicio.localeCompare(b.data_inicio));
+
+  // ===== Card 4: programar férias (colabs com saldo) =====
+  const programar=[];
+  dados.forEach(d=>{
+    let totalSaldo=0,piorDias=Infinity;
+    d.periodos.forEach(p=>{
+      const st=_gfStatusPeriodo(p,hoje);
+      const efetivo=p.diasRealizados+p.diasEmAndamento+p.diasAgendados;
+      const saldo=30-efetivo;
+      if(saldo>0){totalSaldo+=saldo;if(st.diasParaVencer<piorDias)piorDias=st.diasParaVencer;}
+    });
+    if(totalSaldo>0)programar.push({colab:d.colab,cn:d.cn,totalSaldo,piorDias});
+  });
+  programar.sort((a,b)=>a.piorDias-b.piorDias);
+
+  // Renderiza
+  const mesesOpts=MESES.map((m,i)=>`<option value="${i+1}" ${(i+1)===gfMesFiltro?'selected':''}>${m}</option>`).join('');
+  const escColab=cn=>cn.replace(/'/g,"\\'");
+  const linkColab=(cn,label,sub)=>`<li onclick="gfIrPraColab('${escColab(cn)}')"><span>${esc(label)}</span><span class="gf-card-sub">${sub||''}</span></li>`;
+
+  const c1=vencendo.length?vencendo.slice(0,10).map(v=>{
+    const cor=v.dias<=15?'#a64141':(v.dias<=45?'#c97e2f':'#d9a441');
+    return `<li onclick="gfIrPraColab('${escColab(v.cn)}')"><span>${esc(_gfShort(v.colab.nome_curto||v.cn))}<br><span class="gf-card-sub">P${v.per.numero} · saldo ${v.saldo}d</span></span><span class="gf-card-sub" style="color:${cor};font-weight:700">${v.dias}d</span></li>`;
+  }).join(''):'<div class="gf-card-empty">✓ Nenhum vencendo</div>';
+
+  const c2=proximas.length?proximas.slice(0,10).map(f=>{
+    const diasAte=Math.max(0,Math.round((new Date(f.data_inicio+'T12:00')-hoje)/86400000));
+    return `<li onclick="gfIrPraColab('${escColab(f.colaborador)}')"><span>${esc(_gfShort(f.colaborador))}<br><span class="gf-card-sub">${_gfFmt(f.data_inicio)} · ${f.dias}d</span></span><span class="gf-card-sub">em ${diasAte}d</span></li>`;
+  }).join(''):'<div class="gf-card-empty">Nenhuma agendada</div>';
+
+  const c3=noMes.length?noMes.map(f=>`<li onclick="gfIrPraColab('${escColab(f.colaborador)}')"><span>${esc(_gfShort(f.colaborador))}<br><span class="gf-card-sub">${_gfFmt(f.data_inicio)} → ${_gfFmt(f.data_fim)}</span></span><span class="gf-card-sub" style="font-weight:600">${f.dias}d</span></li>`).join(''):'<div class="gf-card-empty">Sem férias neste mês</div>';
+
+  const c4=programar.length?programar.slice(0,10).map(x=>{
+    const urg=x.piorDias<=15?'#a64141':(x.piorDias<=45?'#c97e2f':(x.piorDias<=90?'#d9a441':'#4a5a8c'));
+    return `<li onclick="gfIrPraColab('${escColab(x.cn)}')"><span>${esc(_gfShort(x.colab.nome_curto||x.cn))}<br><span class="gf-card-sub" style="color:${urg}">${x.piorDias<=90?'vence em '+x.piorDias+'d':'sem urgência'}</span></span><span class="gf-card-sub" style="font-weight:700">${x.totalSaldo}d</span></li>`;
+  }).join(''):'<div class="gf-card-empty">✓ Ninguém pendente</div>';
+
+  $('gf-cards-grid').innerHTML=`
+    <div class="gf-card gf-card-c-vermelho">
+      <div class="gf-card-head"><div class="gf-card-titulo">⏰ Próximo a vencer (90d)</div><div class="gf-card-num">${vencendo.length}</div></div>
+      <ul class="gf-card-lista">${c1}</ul>
+    </div>
+    <div class="gf-card gf-card-c-azul">
+      <div class="gf-card-head"><div class="gf-card-titulo">📅 Próximas férias</div><div class="gf-card-num">${proximas.length}</div></div>
+      <ul class="gf-card-lista">${c2}</ul>
+    </div>
+    <div class="gf-card gf-card-c-verde">
+      <div class="gf-card-head"><div class="gf-card-titulo">🗓 Férias no mês</div><select onchange="gfMesFiltro=parseInt(this.value);gfRenderCards()">${mesesOpts}</select></div>
+      <ul class="gf-card-lista">${c3}</ul>
+    </div>
+    <div class="gf-card gf-card-c-laranja">
+      <div class="gf-card-head"><div class="gf-card-titulo">📋 Programar férias</div><div class="gf-card-num">${programar.length}</div></div>
+      <ul class="gf-card-lista">${c4}</ul>
+    </div>
+  `;
 }
 function abrirGFModal(colab,periodoNum,periodoInicio,concessivoFim,saldo){
   gfModalCtx={colab,periodoNum,concessivoFim,saldo};
