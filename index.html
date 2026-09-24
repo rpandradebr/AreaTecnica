@@ -2197,7 +2197,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v102';
+const APP_VERSION='v103';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -3600,8 +3600,13 @@ function abrirIAFer(){
 }
 function fecharIAFer(){$('ia-fer-bg').style.display='none';}
 function salvarChaveIA(){
-  const c=$('ia-fer-chave').value.trim();
-  if(!c.startsWith('AIza')){alert('Chave inválida. Deve começar com "AIza" (chave do Google AI Studio).');return;}
+  // Remove espaços, quebras de linha e caracteres invisíveis (BOM, zero-width, etc)
+  let c=$('ia-fer-chave').value.replace(/[\s\u200B-\u200D\uFEFF]/g,'');
+  if(!c){alert('Cole a chave antes de salvar.');return;}
+  if(c.length<20){alert('A chave parece curta demais ('+c.length+' caracteres). Verifique se copiou inteira.');return;}
+  if(!c.startsWith('AIza')){
+    if(!confirm('A chave não começa com "AIza" (padrão do Google AI Studio).\n\nSalvar mesmo assim e deixar o Google validar?'))return;
+  }
   localStorage.setItem(IA_FER_KEY,c);
   $('ia-fer-chave').value='';
   toast('✓ Chave salva neste navegador');
