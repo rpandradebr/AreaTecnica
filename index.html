@@ -1792,18 +1792,32 @@
       <p class="hint">Controle dos períodos aquisitivos e gozos por colaborador. Cálculo automático a partir da data de admissão. Fracionamento em blocos de 5, 10 ou 15 dias (ou datas livres).</p>
     </div>
     <div class="form-card">
-      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
-        <div style="flex:1;min-width:220px">
-          <input id="gf-busca" oninput="renderGFerias()" placeholder="Buscar por colaborador..." style="width:100%">
-        </div>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;margin:0"><input type="checkbox" id="gf-vencendo-only" onchange="renderGFerias()" style="width:16px;height:16px">Só quem tem período vencendo em 90 dias</label>
-        <button class="btn-edit" onclick="gfExpandirTodos(true)" style="font-size:12px;padding:6px 10px">Expandir todos</button>
-        <button class="btn-edit" onclick="gfExpandirTodos(false)" style="font-size:12px;padding:6px 10px">Recolher todos</button>
+      <div class="gf-subtabs" style="display:flex;gap:4px;border-bottom:2px solid var(--line);margin-bottom:16px;flex-wrap:wrap">
+        <button class="gf-sub-btn" data-sub="painel" onclick="gfSetSubTab('painel')" style="background:transparent;border:none;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;color:var(--ink-soft);border-bottom:3px solid transparent;margin-bottom:-2px;font-family:inherit">📊 Painel</button>
+        <button class="gf-sub-btn" data-sub="analise" onclick="gfSetSubTab('analise')" style="background:transparent;border:none;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;color:var(--ink-soft);border-bottom:3px solid transparent;margin-bottom:-2px;font-family:inherit">🔍 Análise por mês</button>
+        <button class="gf-sub-btn" data-sub="colabs" onclick="gfSetSubTab('colabs')" style="background:transparent;border:none;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;color:var(--ink-soft);border-bottom:3px solid transparent;margin-bottom:-2px;font-family:inherit">👥 Colaboradores</button>
       </div>
-      <div id="gf-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:14px"></div>
-      <div id="gf-analise-panel"></div>
-      <div id="gf-alertas-panel" style="margin-bottom:14px"></div>
-      <div id="gf-lista"></div>
+
+      <div id="gf-sub-painel" class="gf-sub-content">
+        <div id="gf-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:14px"></div>
+        <div id="gf-alertas-panel" style="margin-bottom:14px"></div>
+      </div>
+
+      <div id="gf-sub-analise" class="gf-sub-content" style="display:none">
+        <div id="gf-analise-panel"></div>
+      </div>
+
+      <div id="gf-sub-colabs" class="gf-sub-content" style="display:none">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
+          <div style="flex:1;min-width:220px">
+            <input id="gf-busca" oninput="renderGFerias()" placeholder="Buscar por colaborador..." style="width:100%">
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;margin:0"><input type="checkbox" id="gf-vencendo-only" onchange="renderGFerias()" style="width:16px;height:16px">Só quem tem período vencendo em 90 dias</label>
+          <button class="btn-edit" onclick="gfExpandirTodos(true)" style="font-size:12px;padding:6px 10px">Expandir todos</button>
+          <button class="btn-edit" onclick="gfExpandirTodos(false)" style="font-size:12px;padding:6px 10px">Recolher todos</button>
+        </div>
+        <div id="gf-lista"></div>
+      </div>
     </div>
   </div>
 
@@ -2326,7 +2340,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v113';
+const APP_VERSION='v114';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -6527,7 +6541,24 @@ function renderAtendChartAtd(linhas){
 // ===== Gestão de Férias por Período Aquisitivo =====
 $('nav-gferias').onclick=()=>showView('gferias');
 let gfFerias=[],gfSolicitacoes=[],gfExpandidos=new Set(),gfModalCtx={colab:null};
+let gfSubTabAtual=localStorage.getItem('gfSubTab')||'painel';
 const ATEND_SQL_ERR2='';
+
+function gfSetSubTab(nome){
+  gfSubTabAtual=nome;
+  try{localStorage.setItem('gfSubTab',nome);}catch(e){}
+  ['painel','analise','colabs'].forEach(n=>{
+    const el=document.getElementById('gf-sub-'+n);
+    if(el)el.style.display=(n===nome)?'block':'none';
+  });
+  document.querySelectorAll('.gf-sub-btn').forEach(b=>{
+    const ativo=b.dataset.sub===nome;
+    b.style.color=ativo?'var(--ink)':'var(--ink-soft)';
+    b.style.borderBottomColor=ativo?'#1f6f5c':'transparent';
+    b.style.background=ativo?'rgba(31,111,92,.06)':'transparent';
+  });
+  renderGFerias();
+}
 
 async function openGFerias(){
   const [r,rs]=await Promise.all([
@@ -6536,7 +6567,7 @@ async function openGFerias(){
   ]);
   gfFerias=r.error?[]:(r.data||[]);
   gfSolicitacoes=rs.error?[]:(rs.data||[]);
-  renderGFerias();
+  gfSetSubTab(gfSubTabAtual);
 }
 
 function _gfIso(d){return d.toISOString().slice(0,10);}
@@ -6608,9 +6639,11 @@ function _gfStatusPeriodo(p,hoje){
 }
 
 function renderGFerias(){
-  gfRenderCards();
-  gfRenderAnaliseMes();
-  gfRenderAlertas();
+  if(gfSubTabAtual==='painel'){gfRenderCards();gfRenderAlertas();}
+  else if(gfSubTabAtual==='analise'){gfRenderAnaliseMes();}
+  else if(gfSubTabAtual==='colabs'){renderGFeriasLista();}
+}
+function renderGFeriasLista(){
   const busca=($('gf-busca').value||'').toLowerCase().trim();
   const soVenc=$('gf-vencendo-only').checked;
   const ativos=equipe.filter(e=>!e.desligado).sort((a,b)=>(a.nome_curto||a.nome_completo||'').localeCompare(b.nome_curto||b.nome_completo||''));
@@ -6850,11 +6883,12 @@ function gfRenderAlertas(){
 }
 function gfIrPraColab(colab){
   gfExpandidos.add(colab);
-  renderGFerias();
+  if(gfSubTabAtual!=='colabs'){gfSetSubTab('colabs');}
+  else{renderGFerias();}
   setTimeout(()=>{
     const el=document.querySelector(`[data-colab="${colab.replace(/"/g,'\\"')}"]`);
     if(el)el.scrollIntoView({behavior:'smooth',block:'start'});
-  },100);
+  },150);
 }
 
 // ===== Cards laterais no topo da aba =====
