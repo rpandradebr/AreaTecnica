@@ -1801,6 +1801,7 @@
         <button class="btn-edit" onclick="gfExpandirTodos(false)" style="font-size:12px;padding:6px 10px">Recolher todos</button>
       </div>
       <div id="gf-cards-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:14px"></div>
+      <div id="gf-analise-panel"></div>
       <div id="gf-alertas-panel" style="margin-bottom:14px"></div>
       <div id="gf-lista"></div>
     </div>
@@ -2325,7 +2326,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v112';
+const APP_VERSION='v113';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -6608,6 +6609,7 @@ function _gfStatusPeriodo(p,hoje){
 
 function renderGFerias(){
   gfRenderCards();
+  gfRenderAnaliseMes();
   gfRenderAlertas();
   const busca=($('gf-busca').value||'').toLowerCase().trim();
   const soVenc=$('gf-vencendo-only').checked;
@@ -6955,6 +6957,99 @@ function gfRenderCards(){
     <div class="gf-card gf-card-c-laranja">
       <div class="gf-card-head"><div class="gf-card-titulo">📋 Programar férias</div><div class="gf-card-num">${programar.length}</div></div>
       <ul class="gf-card-lista">${c4}</ul>
+    </div>
+  `;
+}
+
+// ===== Análise por mês (sugestões vs marcadas) =====
+let gfAnaliseMes=null,gfAnaliseAno=null;
+function gfRenderAnaliseMes(){
+  const hoje=new Date();
+  if(gfAnaliseMes==null)gfAnaliseMes=hoje.getMonth()+1;
+  if(gfAnaliseAno==null)gfAnaliseAno=hoje.getFullYear();
+  const m=gfAnaliseMes,a=gfAnaliseAno;
+  const primeiroDia=new Date(a,m-1,1);
+  const ultimoDia=new Date(a,m,0,23,59,59);
+  const tocaMes=(ini,fim)=>{if(!ini||!fim)return false;const i=new Date(ini+'T12:00'),f=new Date(fim+'T12:00');return !(f<primeiroDia||i>ultimoDia);};
+  // Sugestões
+  const sugs=[];
+  gfSolicitacoes.forEach(s=>{
+    const periodos=(s.detalhes&&s.detalhes.periodos)||[];
+    periodos.forEach(pp=>{
+      (pp.prioridades||[]).forEach(pr=>{
+        if(pr.inicio&&pr.fim&&tocaMes(pr.inicio,pr.fim)){
+          sugs.push({colab:s.colaborador,status:s.status,opcao:s.opcao,bloco:pp.label,prio:pr.prioridade,inicio:pr.inicio,fim:pr.fim,dias:_gfDiasEntre(pr.inicio,pr.fim)});
+        }
+      });
+    });
+  });
+  sugs.sort((x,y)=>(x.prio-y.prio)||x.inicio.localeCompare(y.inicio));
+  // Marcadas
+  const marcadas=gfFerias.filter(f=>tocaMes(f.data_inicio,f.data_fim))
+    .map(f=>({...f,dias:_gfDiasEntre(f.data_inicio,f.data_fim)}))
+    .sort((a,b)=>(a.data_inicio||'').localeCompare(b.data_inicio||''));
+  const totalSugDias=sugs.reduce((s,x)=>s+x.dias,0);
+  const totalMarcDias=marcadas.reduce((s,x)=>s+x.dias,0);
+  const totalSugColabs=new Set(sugs.map(s=>s.colab)).size;
+  const totalMarcColabs=new Set(marcadas.map(s=>s.colaborador)).size;
+  const mesesOpts=MESES.map((mm,i)=>`<option value="${i+1}" ${i+1===m?'selected':''}>${mm}</option>`).join('');
+  const anos=[a-2,a-1,a,a+1,a+2];
+  const anosOpts=anos.map(y=>`<option value="${y}" ${y===a?'selected':''}>${y}</option>`).join('');
+  // Sugestões agrupadas por prioridade
+  let sugHtml='';
+  if(sugs.length){
+    const porPrio={1:[],2:[],3:[]};
+    sugs.forEach(s=>{const p=s.prio||1;(porPrio[p]=porPrio[p]||[]).push(s);});
+    sugHtml=Object.keys(porPrio).filter(p=>porPrio[p].length).map(prio=>{
+      const arr=porPrio[prio];
+      const cor=prio==='1'?'#a64141':(prio==='2'?'#c97e2f':'#4a5a8c');
+      const bg=prio==='1'?'#fbf4f4':(prio==='2'?'#fbf0e6':'#eef1f7');
+      return `<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:${cor};text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;display:flex;justify-content:space-between"><span>Prioridade ${prio}</span><span>${arr.length} pedido${arr.length>1?'s':''}</span></div>
+        ${arr.map(x=>{
+          const statusBadge=x.status==='Aprovada'?'<span style="background:#dfebe0;color:#175547;padding:0 5px;border-radius:8px;font-size:9px;font-weight:700;margin-left:4px">APROV</span>':'<span style="background:#fbf0e6;color:#7a4e1f;padding:0 5px;border-radius:8px;font-size:9px;font-weight:700;margin-left:4px">PEND</span>';
+          const escCn=x.colab.replace(/'/g,"\\'");
+          return `<div style="background:${bg};border-left:3px solid ${cor};border-radius:0 4px 4px 0;padding:6px 10px;margin-bottom:3px;font-size:12px;cursor:pointer;display:flex;justify-content:space-between;gap:6px;align-items:center" onclick="gfIrPraColab('${escCn}')">
+            <div><b>${esc(x.colab)}</b>${statusBadge}<br><span style="font-size:11px;color:var(--ink-soft)">${_gfFmt(x.inicio)} → ${_gfFmt(x.fim)}${x.bloco?' · '+esc(x.bloco):''}</span></div>
+            <div style="display:flex;gap:4px;align-items:center"><span style="font-weight:700;color:${cor};white-space:nowrap">${x.dias}d</span><button onclick="event.stopPropagation();gfUsarSugestao('${escCn}','${x.inicio}','${x.fim}')" title="Registrar como gozo" style="background:#1f6f5c;color:#fff;border:none;border-radius:4px;padding:3px 7px;font-size:10px;cursor:pointer;font-family:inherit;font-weight:600">+ Marcar</button></div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }).join('');
+  }else{
+    sugHtml='<div style="text-align:center;color:var(--ink-soft);font-style:italic;font-size:12px;padding:20px 10px">Nenhuma sugestão de colaborador para este mês</div>';
+  }
+  // Marcadas
+  let marcHtml='';
+  if(marcadas.length){
+    marcHtml=marcadas.map(x=>{
+      const escCn=(x.colaborador||'').replace(/'/g,"\\'");
+      const hoje2=_gfIso(new Date());
+      const estado=x.data_fim<hoje2?'<span class="gf-gozo-badge realizado" style="margin-left:4px">✓ Realizado</span>':(x.data_inicio>hoje2?'<span class="gf-gozo-badge agendado" style="margin-left:4px">📅 Agendado</span>':'<span class="gf-gozo-badge andamento" style="margin-left:4px">🔄 Agora</span>');
+      return `<div style="background:#f0f7f2;border-left:3px solid #1f6f5c;border-radius:0 4px 4px 0;padding:6px 10px;margin-bottom:3px;font-size:12px;cursor:pointer;display:flex;justify-content:space-between;gap:6px;align-items:center" onclick="gfIrPraColab('${escCn}')">
+        <div><b>${esc(x.colaborador||'')}</b>${estado}<br><span style="font-size:11px;color:var(--ink-soft)">${_gfFmt(x.data_inicio)} → ${_gfFmt(x.data_fim)}</span></div>
+        <span style="font-weight:700;color:#175547;white-space:nowrap">${x.dias}d</span>
+      </div>`;
+    }).join('');
+  }else{
+    marcHtml='<div style="text-align:center;color:var(--ink-soft);font-style:italic;font-size:12px;padding:20px 10px">Nenhuma férias marcada para este mês</div>';
+  }
+  $('gf-analise-panel').innerHTML=`
+    <div style="background:#f5f2ea;border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--ink)">🔍 Análise por mês</div>
+        <select onchange="gfAnaliseMes=parseInt(this.value);gfRenderAnaliseMes()" style="font-size:12px;padding:3px 8px;border:1px solid var(--line);border-radius:4px;background:#fff">${mesesOpts}</select>
+        <select onchange="gfAnaliseAno=parseInt(this.value);gfRenderAnaliseMes()" style="font-size:12px;padding:3px 8px;border:1px solid var(--line);border-radius:4px;background:#fff">${anosOpts}</select>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px">
+        <div>
+          <div style="font-size:11px;font-weight:700;color:#7a4e1f;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #c97e2f;display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:.04em"><span>📨 Sugestões dos colabs</span><span>${totalSugColabs} pessoa${totalSugColabs!==1?'s':''} · ${totalSugDias}d</span></div>
+          ${sugHtml}
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:700;color:#175547;margin-bottom:8px;padding-bottom:5px;border-bottom:2px solid #1f6f5c;display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:.04em"><span>✅ Férias marcadas</span><span>${totalMarcColabs} pessoa${totalMarcColabs!==1?'s':''} · ${totalMarcDias}d</span></div>
+          ${marcHtml}
+        </div>
+      </div>
     </div>
   `;
 }
