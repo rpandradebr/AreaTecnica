@@ -1742,6 +1742,21 @@
       .gf-gozos ul{margin:4px 0;padding-left:20px}
       .gf-gozos li{padding:2px 0}
       .gf-empty-warn{color:var(--ink-soft);font-style:italic;font-size:11.5px}
+      .gf-al-box{border-radius:8px;padding:12px 14px;margin-bottom:8px;border-left:4px solid;font-size:13px}
+      .gf-al-critico{background:#fbf4f4;border-color:#a64141;color:#5f1e1e}
+      .gf-al-urgente{background:#fbf0e6;border-color:#c97e2f;color:#5f3e15}
+      .gf-al-atencao{background:#faf5e6;border-color:#d9a441;color:#5f491a}
+      .gf-al-info{background:#eef1f7;border-color:#4a5a8c;color:#2b3a63}
+      .gf-al-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px}
+      .gf-al-titulo{font-weight:600;font-size:13px}
+      .gf-al-desc{font-size:12px;opacity:.9;margin-bottom:8px}
+      .gf-al-acoes{display:flex;gap:6px;flex-wrap:wrap}
+      .gf-al-acoes button{font-size:11px;padding:4px 10px;border-radius:4px;border:1px solid rgba(0,0,0,.15);background:#fff;cursor:pointer;color:inherit;font-family:inherit}
+      .gf-al-acoes button:hover{background:rgba(0,0,0,.04)}
+      .gf-al-acoes button.primary{background:#175547;color:#fff;border-color:#175547}
+      .gf-al-resumo{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
+      .gf-al-resumo .pill{padding:4px 12px;border-radius:14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+      .gf-al-toggle{background:transparent;border:none;color:var(--ink-soft);font-size:12px;cursor:pointer;text-decoration:underline;padding:2px 4px}
     </style>
     <div class="form-card" style="background:transparent;border:none;box-shadow:none;padding:0;margin-bottom:14px">
       <h2>Gestão de Férias por Período Aquisitivo</h2>
@@ -1756,6 +1771,7 @@
         <button class="btn-edit" onclick="gfExpandirTodos(true)" style="font-size:12px;padding:6px 10px">Expandir todos</button>
         <button class="btn-edit" onclick="gfExpandirTodos(false)" style="font-size:12px;padding:6px 10px">Recolher todos</button>
       </div>
+      <div id="gf-alertas-panel" style="margin-bottom:14px"></div>
       <div id="gf-lista"></div>
     </div>
   </div>
@@ -2278,7 +2294,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v106';
+const APP_VERSION='v107';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -6539,6 +6555,7 @@ function _gfStatusPeriodo(p,hoje){
 }
 
 function renderGFerias(){
+  gfRenderAlertas();
   const busca=($('gf-busca').value||'').toLowerCase().trim();
   const soVenc=$('gf-vencendo-only').checked;
   const ativos=equipe.filter(e=>!e.desligado).sort((a,b)=>(a.nome_curto||a.nome_completo||'').localeCompare(b.nome_curto||b.nome_completo||''));
@@ -6601,6 +6618,97 @@ function gfExpandirTodos(abrir){
   if(abrir)ativos.forEach(e=>gfExpandidos.add(e.nome_completo||e.nome_curto||''));
   else gfExpandidos.clear();
   renderGFerias();
+}
+
+// ===== Alertas de férias =====
+const GF_ADIADOS_KEY='gf_alertas_adiados';
+function _gfCarregaAdiados(){try{return JSON.parse(localStorage.getItem(GF_ADIADOS_KEY)||'{}');}catch(e){return{};}}
+function _gfSalvaAdiados(o){try{localStorage.setItem(GF_ADIADOS_KEY,JSON.stringify(o));}catch(e){}}
+function _gfAdiarAlerta(alertaId,dias){
+  const o=_gfCarregaAdiados();
+  o[alertaId]=Date.now()+dias*86400000;
+  _gfSalvaAdiados(o);
+  toast(`✓ Alerta adiado por ${dias} dias`);
+  renderGFerias();
+}
+function _gfLimparAdiamentos(){
+  if(!confirm('Limpar todos os adiamentos e reexibir os alertas ocultos?'))return;
+  localStorage.removeItem(GF_ADIADOS_KEY);
+  toast('✓ Adiamentos limpos');
+  renderGFerias();
+}
+function gfCalcularAlertas(){
+  const hoje=new Date();
+  const ativos=equipe.filter(e=>!e.desligado);
+  const alertas=[];
+  ativos.forEach(e=>{
+    const cn=e.nome_completo||e.nome_curto||'';
+    const nomeShort=e.nome_curto||cn;
+    if(!e.admissao){
+      alertas.push({id:'semadm-'+cn,severidade:'info',ordem:9,titulo:'Sem data de admissão',desc:`<b>${esc(nomeShort)}</b> não tem admissão cadastrada. Impossível calcular períodos aquisitivos.`,colab:cn,acaoIr:false});
+      return;
+    }
+    const gozos=gfFerias.filter(f=>f.colaborador===cn);
+    const periodos=atribuirGozosAosPeriodos(gozos,calcPeriodosAquisitivos(e.admissao,hoje));
+    periodos.forEach(p=>{
+      const st=_gfStatusPeriodo(p,hoje);
+      const saldo=30-p.diasGozados;
+      const alertaBase={colab:cn,periodoNum:p.numero,periodoInicio:p.inicio,concessivoFim:p.concessivoFim,saldo};
+      if(st.key==='vencido'){
+        alertas.push({...alertaBase,id:`venc-${cn}-${p.numero}`,severidade:'critico',ordem:0,titulo:'⚠ CONCESSIVO VENCIDO — saldo em risco',desc:`<b>${esc(nomeShort)}</b> · Período aquisitivo ${p.numero} (${_gfFmt(p.inicio)} → ${_gfFmt(p.fim)}) · Concessivo venceu em <b>${_gfFmt(p.concessivoFim)}</b> · Saldo pendente: <b>${saldo} dias</b>`});
+      }else if((st.key==='parcial'||st.key==='aberto')&&st.diasParaVencer>=0){
+        if(st.diasParaVencer<=15){
+          alertas.push({...alertaBase,id:`v15-${cn}-${p.numero}`,severidade:'critico',ordem:1,titulo:`🚨 Vence em ${st.diasParaVencer} dias`,desc:`<b>${esc(nomeShort)}</b> · Período aquisitivo ${p.numero} · Concessivo vence em <b>${_gfFmt(p.concessivoFim)}</b> · Saldo: <b>${saldo} dias</b> a programar`});
+        }else if(st.diasParaVencer<=45){
+          alertas.push({...alertaBase,id:`v45-${cn}-${p.numero}`,severidade:'urgente',ordem:2,titulo:`⚠ Vence em ${st.diasParaVencer} dias`,desc:`<b>${esc(nomeShort)}</b> · Período aquisitivo ${p.numero} · Concessivo vence em <b>${_gfFmt(p.concessivoFim)}</b> · Saldo: <b>${saldo} dias</b>`});
+        }else if(st.diasParaVencer<=90){
+          alertas.push({...alertaBase,id:`v90-${cn}-${p.numero}`,severidade:'atencao',ordem:3,titulo:`⏰ Vence em ${st.diasParaVencer} dias`,desc:`<b>${esc(nomeShort)}</b> · Período aquisitivo ${p.numero} · Concessivo vence em <b>${_gfFmt(p.concessivoFim)}</b> · Saldo: <b>${saldo} dias</b> — hora de planejar`});
+        }
+      }
+    });
+  });
+  // Ordena por severidade + dias
+  alertas.sort((a,b)=>a.ordem-b.ordem);
+  return alertas;
+}
+function gfRenderAlertas(){
+  const todos=gfCalcularAlertas();
+  const adiados=_gfCarregaAdiados();
+  const agora=Date.now();
+  const ativos=todos.filter(a=>!adiados[a.id]||adiados[a.id]<agora);
+  const adiadosCount=todos.length-ativos.length;
+  const box=$('gf-alertas-panel');
+  if(!ativos.length){
+    box.innerHTML=`<div style="background:#eef4ee;border-left:4px solid #1f6f5c;padding:12px 16px;border-radius:0 8px 8px 0;color:#175547;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:10px"><span>✓ Nenhuma pendência ativa no momento.</span>${adiadosCount?`<button class="gf-al-toggle" onclick="_gfLimparAdiamentos()">Ver ${adiadosCount} adiada(s)</button>`:''}</div>`;
+    return;
+  }
+  const cont={critico:0,urgente:0,atencao:0,info:0};
+  ativos.forEach(a=>cont[a.severidade]++);
+  let h='<div class="gf-al-resumo">';
+  if(cont.critico)h+=`<span class="pill" style="background:#a64141;color:#fff">${cont.critico} crítico${cont.critico>1?'s':''}</span>`;
+  if(cont.urgente)h+=`<span class="pill" style="background:#c97e2f;color:#fff">${cont.urgente} urgente${cont.urgente>1?'s':''}</span>`;
+  if(cont.atencao)h+=`<span class="pill" style="background:#d9a441;color:#fff">${cont.atencao} de atenção</span>`;
+  if(cont.info)h+=`<span class="pill" style="background:#4a5a8c;color:#fff">${cont.info} informativo${cont.info>1?'s':''}</span>`;
+  if(adiadosCount)h+=`<button class="gf-al-toggle" onclick="_gfLimparAdiamentos()">${adiadosCount} adiada(s) — mostrar</button>`;
+  h+='</div>';
+  ativos.forEach(a=>{
+    const idEsc=a.id.replace(/'/g,"\\'");
+    const acoes=[];
+    if(a.acaoIr!==false)acoes.push(`<button onclick="gfIrPraColab('${esc(a.colab).replace(/'/g,"\\'")}')">→ Ver colaborador</button>`);
+    if(a.periodoNum&&a.saldo>0)acoes.push(`<button class="primary" onclick="abrirGFModal('${esc(a.colab).replace(/'/g,"\\'")}',${a.periodoNum},'${a.periodoInicio}','${a.concessivoFim}',${a.saldo})">+ Registrar gozo</button>`);
+    acoes.push(`<button onclick="_gfAdiarAlerta('${idEsc}',7)">⏸ Adiar 7d</button>`);
+    acoes.push(`<button onclick="_gfAdiarAlerta('${idEsc}',30)">⏸ Adiar 30d</button>`);
+    h+=`<div class="gf-al-box gf-al-${a.severidade}"><div class="gf-al-head"><div class="gf-al-titulo">${a.titulo}</div></div><div class="gf-al-desc">${a.desc}</div><div class="gf-al-acoes">${acoes.join('')}</div></div>`;
+  });
+  box.innerHTML=h;
+}
+function gfIrPraColab(colab){
+  gfExpandidos.add(colab);
+  renderGFerias();
+  setTimeout(()=>{
+    const el=document.querySelector(`[data-colab="${colab.replace(/"/g,'\\"')}"]`);
+    if(el)el.scrollIntoView({behavior:'smooth',block:'start'});
+  },100);
 }
 function abrirGFModal(colab,periodoNum,periodoInicio,concessivoFim,saldo){
   gfModalCtx={colab,periodoNum,concessivoFim,saldo};
