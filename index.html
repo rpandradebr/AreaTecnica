@@ -283,6 +283,7 @@
     <div class="nav-group" data-group="aus">
       <button class="group-label">📅 Ausências</button>
       <div class="group-items">
+        <button id="nav-meus">👤 Minhas ausências</button>
         <button id="nav-fer">Férias</button>
         <button id="nav-fol">Folgas</button>
         <button id="nav-ho">Home Office</button>
@@ -456,6 +457,13 @@
   </div>
 
   <!-- VIEW: FÉRIAS (somente admin) -->
+  <!-- VIEW: Minhas Ausências (todos os usuários) -->
+  <div id="view-meus" style="display:none">
+    <div id="meus-header" style="margin-bottom:16px"></div>
+    <div id="meus-kpis" class="counts" style="margin-bottom:16px"></div>
+    <div id="meus-body"></div>
+  </div>
+
   <div id="view-ferias" style="display:none">
     <div class="form-card">
       <h2 id="fe-title">Lançar férias</h2>
@@ -2358,7 +2366,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v120';
+const APP_VERSION='v121';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -2398,6 +2406,11 @@ async function showApp(user){
   // Registra último login (silenciosamente; ignora erro se a tabela não existir)
   try{await db.from('usuarios').update({ultimo_login:new Date().toISOString()}).eq('email',user.email);}catch(e){}
   try{const{data}=await db.from('equipe').select('*').order('nome_completo');equipe=data||[];}catch(e){}
+  // Carrega lista de usuarios cedo pra permitir checar role do banco
+  try{const{data}=await db.from('usuarios').select('*');usuarios=data||[];}catch(e){}
+  // Se o usuário tem role=admin no banco, promove a admin (além dos hardcoded)
+  const uRec=(usuarios||[]).find(x=>(x.email||'').toLowerCase()===currentEmail.toLowerCase());
+  if(uRec&&uRec.role==='admin')isAdminUser=true;
   setupPresence();
   $('nav').style.display='flex';
   // Admin geral (visível para os 3 admins): cadastros, relatórios, gestão de equipe/patrimônio, dashboards
@@ -2625,6 +2638,7 @@ function showView(v){
   $('view-onb').style.display=v==='onb'?'block':'none';
   $('view-eq').style.display=v==='eq'?'block':'none';
   $('view-us').style.display=v==='us'?'block':'none';
+  $('view-meus').style.display=v==='meus'?'block':'none';
   $('view-ho').style.display=v==='ho'?'block':'none';
   $('view-mho').style.display=v==='mho'?'block':'none';
   $('view-aloc').style.display=v==='aloc'?'block':'none';
@@ -2686,6 +2700,7 @@ function showView(v){
   $('nav-onb').classList.toggle('active',v==='onb');
   $('nav-eq').classList.toggle('active',v==='eq');
   $('nav-us').classList.toggle('active',v==='us');
+  $('nav-meus').classList.toggle('active',v==='meus');
   $('nav-ho').classList.toggle('active',v==='ho');
   $('nav-mho').classList.toggle('active',v==='mho');
   $('nav-aloc').classList.toggle('active',v==='aloc');
@@ -2734,6 +2749,7 @@ function showView(v){
   if(v==='onb')openOnb();
   if(v==='eq')openEq();
   if(v==='us')openUs();
+  if(v==='meus')openMeusAusencias();
   if(v==='ho')openHo();
   if(v==='mho')openMho();
   if(v==='aloc')openAloc();
@@ -8565,6 +8581,72 @@ async function openMcad(){
 $('nav-mcad').onclick=()=>showView('mcad');
 
 // ===== Usuários (gestão de acessos) =====
+// ===== MINHAS AUSÊNCIAS (visível para todo usuário logado) =====
+async function openMeusAusencias(){
+  const email=(currentEmail||'').toLowerCase().trim();
+  if(!email){$('meus-header').innerHTML='<div class="empty">Você precisa estar logado.</div>';$('meus-kpis').innerHTML='';$('meus-body').innerHTML='';return;}
+  // Descobre o nome do colaborador pelo email: 1º vínculo em usuarios.nome_colaborador, 2º equipe.email
+  let nomeColab=null,colabObj=null;
+  const u=(usuarios||[]).find(x=>(x.email||'').toLowerCase().trim()===email);
+  if(u&&u.nome_colaborador)nomeColab=u.nome_colaborador;
+  if(!nomeColab){const e=(equipe||[]).find(x=>(x.email||'').toLowerCase().trim()===email);if(e)nomeColab=e.nome_completo||e.nome_curto;}
+  if(nomeColab){const e=(equipe||[]).find(x=>(x.nome_completo||x.nome_curto)===nomeColab);colabObj=e||null;nomeColab=_gfNomeCanonico(nomeColab)||nomeColab;}
+  $('meus-header').innerHTML=nomeColab
+    ?`<h2 style="font-family:var(--display);font-size:22px;margin-bottom:4px">Olá, ${esc(nomeColab)} 👋</h2><p style="color:var(--ink-soft);font-size:13px;margin:0">Suas férias, folgas e atestados registrados no sistema.</p>`
+    :`<h2 style="font-family:var(--display);font-size:22px;margin-bottom:4px">Minhas ausências</h2><div style="padding:10px 14px;background:#fbf0e6;border-left:4px solid #c97e2f;border-radius:0 6px 6px 0;font-size:13px;margin-top:8px">⚠ Não encontramos vínculo entre o seu e-mail <b>${esc(email)}</b> e um colaborador cadastrado. Peça ao administrador para vincular seu usuário.</div>`;
+  if(!nomeColab){$('meus-kpis').innerHTML='';$('meus-body').innerHTML='';return;}
+  // Busca os dados: ferias, folgas, atestados (precisa recarregar pra garantir frescor)
+  await Promise.all([
+    (async()=>{const r=await db.from('ferias').select('*').order('data_inicio',{ascending:false});if(!r.error)ferias=r.data||[];})(),
+    (async()=>{const r=await db.from('folgas').select('*').order('data',{ascending:false});if(!r.error)folgas=r.data||[];})(),
+    (async()=>{const r=await db.from('atestados').select('*').order('data',{ascending:false});if(!r.error)atestados=r.data||[];})()
+  ]);
+  const match=n=>{const c=_gfNomeCanonico(n)||n||'';return c===nomeColab;};
+  const minhasFer=(ferias||[]).filter(f=>match(f.colaborador));
+  const minhasFol=(folgas||[]).filter(f=>match(f.colaborador));
+  const minhasAte=(atestados||[]).filter(f=>match(f.colaborador));
+  // KPIs
+  const hojeIso=_gfIso(new Date());
+  const anoAtual=String(new Date().getFullYear());
+  const ferDiasAno=minhasFer.filter(f=>f.data_inicio&&f.data_inicio.slice(0,4)===anoAtual).reduce((s,f)=>s+_gfDiasEntre(f.data_inicio,f.data_fim),0);
+  const ferEmCurso=minhasFer.filter(f=>f.data_inicio<=hojeIso&&f.data_fim>=hojeIso).length;
+  const ferAgend=minhasFer.filter(f=>f.data_inicio>hojeIso).length;
+  const folAno=minhasFol.filter(f=>f.data&&f.data.slice(0,4)===anoAtual).length;
+  const ateAno=minhasAte.filter(a=>a.data&&a.data.slice(0,4)===anoAtual).length;
+  $('meus-kpis').innerHTML=[
+    ['Dias de férias em '+anoAtual,ferDiasAno,'s-uso'],
+    ['Férias agendadas',ferAgend,ferAgend?'s-disp':''],
+    ['Em férias agora',ferEmCurso,ferEmCurso?'s-manut':''],
+    ['Folgas em '+anoAtual,folAno,''],
+    ['Atestados em '+anoAtual,ateAno,'']
+  ].map(k=>`<div class="stat ${k[2]}"><b>${k[1]}</b><span>${esc(k[0])}</span></div>`).join('');
+  // Corpo com 3 seções
+  const secFer=minhasFer.length?minhasFer.map(f=>{
+    const hj=hojeIso;
+    const st=f.data_fim<hj?'Concluída':(f.data_inicio>hj?'Agendada':'Em curso');
+    const corBadge=st==='Concluída'?'b-desc':(st==='Agendada'?'b-disp':'b-uso');
+    const dias=_gfDiasEntre(f.data_inicio,f.data_fim);
+    return `<div class="row-item" style="cursor:default;align-items:flex-start">
+      <div><div class="ri-main">${_gfFmt(f.data_inicio)} → ${_gfFmt(f.data_fim)}</div>
+      <div class="ri-sub">${dias} dia(s)${f.observacao?' · '+esc(f.observacao):''}</div></div>
+      <span class="badge ${corBadge}">${st}</span>
+    </div>`;
+  }).join(''):'<div class="empty">Nenhuma férias registrada.</div>';
+  const secFol=minhasFol.length?minhasFol.map(f=>`<div class="row-item" style="cursor:default;align-items:flex-start">
+      <div><div class="ri-main">${_gfFmt(f.data)}</div>
+      <div class="ri-sub">${esc(f.tipo||'Folga')}${f.observacao?' · '+esc(f.observacao):''}</div></div>
+    </div>`).join(''):'<div class="empty">Nenhuma folga registrada.</div>';
+  const secAte=minhasAte.length?minhasAte.map(a=>`<div class="row-item" style="cursor:default;align-items:flex-start">
+      <div><div class="ri-main">${_gfFmt(a.data)}${a.data_fim&&a.data_fim!==a.data?' → '+_gfFmt(a.data_fim):''}</div>
+      <div class="ri-sub">${esc(a.tipo||'Atestado')}${a.observacao?' · '+esc(a.observacao):''}</div></div>
+    </div>`).join(''):'<div class="empty">Nenhum atestado registrado.</div>';
+  $('meus-body').innerHTML=`
+    <div style="margin-bottom:22px"><h3 style="font-family:var(--display);font-size:18px;margin-bottom:10px;color:#175547">🏖 Férias</h3><div class="list">${secFer}</div></div>
+    <div style="margin-bottom:22px"><h3 style="font-family:var(--display);font-size:18px;margin-bottom:10px;color:#2b3a63">📋 Folgas</h3><div class="list">${secFol}</div></div>
+    <div style="margin-bottom:22px"><h3 style="font-family:var(--display);font-size:18px;margin-bottom:10px;color:#7a4e1f">🏥 Atestados</h3><div class="list">${secAte}</div></div>
+  `;
+}
+
 async function openUs(){
   const{data,error}=await db.from('usuarios').select('*').order('criado_em',{ascending:false});
   if(error){$('us-lista').innerHTML='<div class="empty"><b>Tabela de usuários ainda não existe</b>Rode o SQL e recarregue a página.</div>';return;}
@@ -8585,26 +8667,48 @@ function renderUs(){
     ['Total cadastrados',usuarios.length,''],['Ativos',ativos,'s-uso'],['Inativos',inativos,inativos?'s-manut':''],['Cadastros nos últimos 30 dias',ult30,'s-disp']
   ].map(k=>`<div class="stat ${k[2]}"><b>${k[1]}</b><span>${esc(k[0])}</span></div>`).join('');
   if(!arr.length){$('us-lista').innerHTML='<div class="empty">Nenhum usuário encontrado.</div>';return;}
+  // Opções de colaboradores pra vincular
+  const colabOpts=(equipe||[]).filter(e=>!e.desligado).map(e=>e.nome_completo||e.nome_curto||'').filter(Boolean).sort((a,b)=>a.localeCompare(b,'pt-BR'));
   $('us-lista').innerHTML='<div class="list">'+arr.map(u=>{
-    const ehAdmin=ADMIN_EMAILS.includes(u.email);
-    return`<div class="row-item" style="cursor:default;align-items:flex-start">
-      <div style="flex:1;min-width:0">
-        <div class="ri-main">${esc(u.email||'(sem e-mail)')}${ehAdmin?' <span class="badge b-disp" style="margin-left:6px">admin</span>':''}</div>
-        <div class="ri-sub">Cadastrado em <b>${fmtTs(u.criado_em)}</b>${u.ultimo_login?' · Último login: <b>'+fmtTs(u.ultimo_login)+'</b>':' · <i>ainda não logou</i>'}</div>
-        ${u.obs?`<div class="ri-sub" style="margin-top:4px"><i>${esc(u.obs)}</i></div>`:''}
-      </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
-        <span class="badge ${u.ativo?'b-uso':'b-desc'}">${u.ativo?'Ativo':'Inativo'}</span>
-        <div class="item-actions">
-          <button class="btn-edit" onclick="resetSenhaUs('${esc(u.email).replace(/'/g,"\\'")}')">📧 Reset por email</button>
-          <button class="btn-edit" onclick="trocarSenhaUs('${esc(u.email).replace(/'/g,"\\'")}')">🔑 Trocar aqui</button>
-          ${ehAdmin?'':`<button class="btn-edit" onclick="toggleAtivoUs('${u.id}',${!u.ativo})">${u.ativo?'Desativar':'Ativar'}</button>`}
-          <button class="btn-edit" onclick="anotarUs('${u.id}')">Observação</button>
-          ${ehAdmin?'':`<button class="btn-del" onclick="excluirUs('${u.id}','${esc(u.email).replace(/'/g,"\\'")}')">Excluir</button>`}
+    const ehAdminHard=ADMIN_EMAILS.includes(u.email);
+    const roleAtual=ehAdminHard?'admin':(u.role||'colaborador');
+    const corRole=roleAtual==='admin'?'#1f6f5c':(roleAtual==='gestor'?'#c97e2f':'#4a5a8c');
+    const labelRole=roleAtual==='admin'?'Admin':(roleAtual==='gestor'?'Gestor':'Colaborador');
+    const colOpts=['<option value="">— vincular colaborador —</option>']
+      .concat(colabOpts.map(n=>`<option value="${esc(n)}" ${u.nome_colaborador===n?'selected':''}>${esc(n)}</option>`)).join('');
+    const roleOpts=['admin','gestor','colaborador'].map(r=>`<option value="${r}" ${roleAtual===r?'selected':''}>${r==='admin'?'Admin':(r==='gestor'?'Gestor':'Colaborador')}</option>`).join('');
+    return`<div class="row-item" style="cursor:default;align-items:flex-start;flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;width:100%">
+        <div style="flex:1;min-width:0">
+          <div class="ri-main">${esc(u.email||'(sem e-mail)')} <span class="badge" style="background:${corRole};color:#fff;margin-left:6px">${labelRole}</span></div>
+          <div class="ri-sub">Cadastrado em <b>${fmtTs(u.criado_em)}</b>${u.ultimo_login?' · Último login: <b>'+fmtTs(u.ultimo_login)+'</b>':' · <i>ainda não logou</i>'}</div>
+          ${u.nome_colaborador?`<div class="ri-sub" style="margin-top:2px">Vinculado a: <b>${esc(u.nome_colaborador)}</b></div>`:''}
+          ${u.obs?`<div class="ri-sub" style="margin-top:4px"><i>${esc(u.obs)}</i></div>`:''}
         </div>
+        <span class="badge ${u.ativo?'b-uso':'b-desc'}">${u.ativo?'Ativo':'Inativo'}</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;padding:8px 10px;background:#f7f5ee;border-radius:6px">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;margin:0">Permissão: <select id="us-role-${u.id}" style="width:auto;font-size:12px;padding:4px 8px" ${ehAdminHard?'disabled':''}>${roleOpts}</select></label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;margin:0;flex:1;min-width:200px">Colaborador: <select id="us-col-${u.id}" style="width:auto;flex:1;font-size:12px;padding:4px 8px">${colOpts}</select></label>
+        <button class="btn-primary" onclick="salvarPermUs('${u.id}')" style="font-size:12px;padding:5px 12px" ${ehAdminHard?'disabled':''}>Salvar</button>
+      </div>
+      <div class="item-actions" style="width:100%">
+        <button class="btn-edit" onclick="resetSenhaUs('${esc(u.email).replace(/'/g,"\\'")}')">📧 Reset por email</button>
+        <button class="btn-edit" onclick="trocarSenhaUs('${esc(u.email).replace(/'/g,"\\'")}')">🔑 Trocar aqui</button>
+        ${ehAdminHard?'':`<button class="btn-edit" onclick="toggleAtivoUs('${u.id}',${!u.ativo})">${u.ativo?'Desativar':'Ativar'}</button>`}
+        <button class="btn-edit" onclick="anotarUs('${u.id}')">Observação</button>
+        ${ehAdminHard?'':`<button class="btn-del" onclick="excluirUs('${u.id}','${esc(u.email).replace(/'/g,"\\'")}')">Excluir</button>`}
       </div>
     </div>`;
   }).join('')+'</div>';
+}
+async function salvarPermUs(id){
+  const role=$('us-role-'+id).value;
+  const nomeColab=$('us-col-'+id).value||null;
+  const{error}=await db.from('usuarios').update({role,nome_colaborador:nomeColab}).eq('id',id);
+  if(error){alert('Erro ao salvar: '+error.message+'\n\nSe o erro mencionar "role" ou "nome_colaborador", rode o SQL: adicionar_role_usuarios.sql');return;}
+  toast('✓ Permissão atualizada');
+  openUs();
 }
 async function resetSenhaUs(email){
   if(!confirm(`Enviar e-mail de redefinição de senha para ${email}?\n\nO usuário vai receber um link no e-mail, clica nele e cria uma nova senha.`))return;
@@ -8669,6 +8773,7 @@ async function excluirUs(id,email){
   toast('Registro removido');openUs();
 }
 $('nav-us').onclick=()=>showView('us');
+$('nav-meus').onclick=()=>showView('meus');
 
 async function zerarTabelaUma(tabela,label,reloadFn){
   let count=0;
