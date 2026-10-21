@@ -2366,7 +2366,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v121';
+const APP_VERSION='v122';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -2408,9 +2408,9 @@ async function showApp(user){
   try{const{data}=await db.from('equipe').select('*').order('nome_completo');equipe=data||[];}catch(e){}
   // Carrega lista de usuarios cedo pra permitir checar role do banco
   try{const{data}=await db.from('usuarios').select('*');usuarios=data||[];}catch(e){}
-  // Se o usuário tem role=admin no banco, promove a admin (além dos hardcoded)
+  // Se o usuário tem role=super_admin ou admin no banco, promove a admin (além dos hardcoded)
   const uRec=(usuarios||[]).find(x=>(x.email||'').toLowerCase()===currentEmail.toLowerCase());
-  if(uRec&&uRec.role==='admin')isAdminUser=true;
+  if(uRec&&(uRec.role==='super_admin'||uRec.role==='admin'))isAdminUser=true;
   setupPresence();
   $('nav').style.display='flex';
   // Admin geral (visível para os 3 admins): cadastros, relatórios, gestão de equipe/patrimônio, dashboards
@@ -2441,7 +2441,7 @@ async function showApp(user){
   $('nav-mequipehj').style.display=isAdminUser?'none':'';
   hideEmptyGroups();
   if(isAdminUser)await loadAll();
-  if(isRafael)updatePendingBadges();
+  if(isAdminUser)updatePendingBadges();
   showView(isAdminUser?'aloc':'mequipehj');
 }
 
@@ -2503,6 +2503,19 @@ async function doLogin(){
   const{data,error}=await db.auth.signInWithPassword({email,password});
   $('btn-auth').disabled=false;$('btn-auth').textContent='Entrar';
   if(error){err.textContent='E-mail ou senha inválidos.';err.style.display='block';return;}
+  // Checa aprovação antes de deixar entrar
+  const emailLow=email.toLowerCase();
+  if(!ADMIN_EMAILS.includes(emailLow)){
+    try{
+      const{data:urow}=await db.from('usuarios').select('aprovado').eq('email',email).maybeSingle();
+      if(urow&&urow.aprovado===false){
+        await db.auth.signOut();
+        err.style.background='#fbf0e6';err.style.color='#7a4e1f';
+        err.textContent='⏳ Seu cadastro ainda está pendente de aprovação do administrador. Avise um administrador para liberar seu acesso.';
+        err.style.display='block';return;
+      }
+    }catch(e){}
+  }
   showApp(data.user);
 }
 async function doSignup(){
@@ -2519,6 +2532,26 @@ async function doSignup(){
       msg='Limite de e-mails do Supabase atingido (3 por hora). Peça ao administrador para desativar "Confirm email" em Supabase → Authentication → Providers → Email, ou aguarde 1 hora.';
     }
     err.textContent=msg;err.style.display='block';return;
+  }
+  // Registra em usuarios como PENDENTE de aprovação (admins hardcoded entram aprovados)
+  const emailLow=email.toLowerCase();
+  const ehAdminHard=ADMIN_EMAILS.includes(emailLow);
+  try{
+    await db.from('usuarios').upsert({
+      email,
+      aprovado:ehAdminHard,
+      role:ehAdminHard?'super_admin':'colaborador',
+      ativo:true,
+      criado_em:new Date().toISOString()
+    },{onConflict:'email'});
+  }catch(e){}
+  // Se não é admin hardcoded, faz logout e mostra mensagem de pendência
+  if(!ehAdminHard){
+    await db.auth.signOut();
+    setAuthMode('login');
+    err.style.background='#fbf0e6';err.style.color='#7a4e1f';
+    err.textContent='✓ Cadastro recebido! Seu acesso está pendente de aprovação do administrador. Você receberá acesso assim que for liberado.';
+    err.style.display='block';return;
   }
   if(data.session){showApp(data.user);}
   else{setAuthMode('login');err.style.background='#e6efe9';err.style.color='#175547';err.textContent='Conta criada! Confirme pelo e-mail antes de entrar.';err.style.display='block';}
@@ -4304,6 +4337,21 @@ async function updatePendingBadges(){
     try{const r=await db.from(tbl).select('id',{count:'exact',head:true}).eq('status',st);n=r.count||0;}catch(e){}
     if($(id))$(id).innerHTML=esc(label)+(n?'<span class="nav-badge">'+n+'</span>':'');
   }
+  // Badge de usuários pendentes de aprovação no nav-us
+  try{
+    const r=await db.from('usuarios').select('id',{count:'exact',head:true}).eq('aprovado',false);
+    const n=r.count||0;
+    if($('nav-us'))$('nav-us').innerHTML='Usuários'+(n?'<span class="nav-badge">'+n+'</span>':'');
+  }catch(e){}
+}
+// ===== Checa permissão específica do usuário logado =====
+function temPermissao(k){
+  if(ADMIN_EMAILS.includes((currentEmail||'').toLowerCase()))return true;
+  const u=(usuarios||[]).find(x=>(x.email||'').toLowerCase()===(currentEmail||'').toLowerCase());
+  if(!u)return false;
+  if(u.role==='super_admin'||u.role==='admin')return true;
+  const perms=Array.isArray(u.permissoes)?u.permissoes:[];
+  return perms.includes(k);
 }
 
 // ===== Meus registros (colaborador) =====
@@ -8652,9 +8700,31 @@ async function openUs(){
   if(error){$('us-lista').innerHTML='<div class="empty"><b>Tabela de usuários ainda não existe</b>Rode o SQL e recarregue a página.</div>';return;}
   usuarios=data||[];renderUs();
 }
+// Catálogo de permissões específicas (por aba/módulo)
+const PERM_CATALOGO=[
+  {k:'ferias',l:'Férias (CRUD)'},
+  {k:'folgas',l:'Folgas (CRUD)'},
+  {k:'atestados',l:'Atestados (CRUD)'},
+  {k:'ocorrencias',l:'Ocorrências (CRUD)'},
+  {k:'equipe',l:'Equipe (cadastro)'},
+  {k:'patrimonio',l:'Patrimônio (CRUD)'},
+  {k:'metas',l:'Metas e dashboards'},
+  {k:'gferias',l:'Gestão de Férias'},
+  {k:'aprovar_ferias',l:'Aprovar pedidos de férias'},
+  {k:'aprovar_folgas',l:'Aprovar pedidos de folga'},
+  {k:'aprovar_atestados',l:'Aprovar pedidos de atestado'},
+  {k:'aprovar_ocorrencias',l:'Aprovar pedidos de ocorrência'},
+  {k:'relatorios',l:'Ver relatórios'},
+  {k:'faturamento',l:'Faturamento'},
+  {k:'tarefas',l:'Tarefas'},
+  {k:'rotinas',l:'Rotinas / Onboarding'}
+];
 function renderUs(){
   const q=$('us-busca').value.trim().toLowerCase(),fs=$('us-fstatus').value;
-  const arr=usuarios.filter(u=>{
+  // Separa pendentes dos aprovados
+  const pendentes=usuarios.filter(u=>u.aprovado===false&&!ADMIN_EMAILS.includes(u.email));
+  const resto=usuarios.filter(u=>u.aprovado!==false||ADMIN_EMAILS.includes(u.email));
+  const arr=resto.filter(u=>{
     if(fs==='ativo'&&!u.ativo)return false;
     if(fs==='inativo'&&u.ativo)return false;
     if(q&&!(u.email||'').toLowerCase().includes(q))return false;
@@ -8664,19 +8734,48 @@ function renderUs(){
   const inativos=usuarios.length-ativos;
   const ult30=usuarios.filter(u=>{if(!u.criado_em)return false;const d=new Date(u.criado_em);return(Date.now()-d.getTime())<30*86400000;}).length;
   $('us-kpis').innerHTML=[
-    ['Total cadastrados',usuarios.length,''],['Ativos',ativos,'s-uso'],['Inativos',inativos,inativos?'s-manut':''],['Cadastros nos últimos 30 dias',ult30,'s-disp']
+    ['Total cadastrados',usuarios.length,''],
+    ['Pendentes',pendentes.length,pendentes.length?'s-manut':''],
+    ['Ativos',ativos,'s-uso'],
+    ['Cadastros nos últimos 30 dias',ult30,'s-disp']
   ].map(k=>`<div class="stat ${k[2]}"><b>${k[1]}</b><span>${esc(k[0])}</span></div>`).join('');
-  if(!arr.length){$('us-lista').innerHTML='<div class="empty">Nenhum usuário encontrado.</div>';return;}
   // Opções de colaboradores pra vincular
   const colabOpts=(equipe||[]).filter(e=>!e.desligado).map(e=>e.nome_completo||e.nome_curto||'').filter(Boolean).sort((a,b)=>a.localeCompare(b,'pt-BR'));
-  $('us-lista').innerHTML='<div class="list">'+arr.map(u=>{
+  // Verifica se usuário atual é SUPER admin (pode conceder super_admin a outros)
+  const meRec=usuarios.find(x=>(x.email||'').toLowerCase()===(currentEmail||'').toLowerCase());
+  const souSuperAdmin=ADMIN_EMAILS.includes((currentEmail||'').toLowerCase())||(meRec&&meRec.role==='super_admin');
+  // ===== Bloco de pendentes de aprovação =====
+  let htmlPend='';
+  if(pendentes.length){
+    htmlPend=`<div style="background:#fbf0e6;border:2px solid #c97e2f;border-radius:10px;padding:14px 16px;margin-bottom:18px">
+      <div style="font-size:14px;font-weight:700;color:#7a4e1f;margin-bottom:10px;display:flex;align-items:center;gap:8px">⏳ ${pendentes.length} usuário(s) aguardando aprovação</div>
+      ${pendentes.map(u=>{
+        const emailEsc=esc(u.email).replace(/'/g,"\\'");
+        return `<div style="background:#fff;border:1px solid #d9b489;border-radius:6px;padding:10px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+          <div><b>${esc(u.email||'')}</b><div style="font-size:11px;color:var(--ink-soft);margin-top:2px">Cadastrou-se em ${fmtTs(u.criado_em)}</div></div>
+          <div style="display:flex;gap:6px">
+            <button class="btn-primary" onclick="aprovarUs('${u.id}')" style="font-size:12px;padding:6px 14px">✓ Aprovar</button>
+            <button class="btn-del" onclick="recusarUs('${u.id}','${emailEsc}')" style="font-size:12px;padding:6px 14px">✗ Recusar</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+  if(!arr.length&&!pendentes.length){$('us-lista').innerHTML='<div class="empty">Nenhum usuário encontrado.</div>';return;}
+  const listaHtml=arr.length?'<div class="list">'+arr.map(u=>{
     const ehAdminHard=ADMIN_EMAILS.includes(u.email);
-    const roleAtual=ehAdminHard?'admin':(u.role||'colaborador');
-    const corRole=roleAtual==='admin'?'#1f6f5c':(roleAtual==='gestor'?'#c97e2f':'#4a5a8c');
-    const labelRole=roleAtual==='admin'?'Admin':(roleAtual==='gestor'?'Gestor':'Colaborador');
+    const roleAtual=ehAdminHard?'super_admin':(u.role||'colaborador');
+    const corRole=roleAtual==='super_admin'?'#5b1f6f':(roleAtual==='admin'?'#1f6f5c':(roleAtual==='gestor'?'#c97e2f':'#4a5a8c'));
+    const labelRole=roleAtual==='super_admin'?'Super Admin':(roleAtual==='admin'?'Admin':(roleAtual==='gestor'?'Gestor':'Colaborador'));
     const colOpts=['<option value="">— vincular colaborador —</option>']
       .concat(colabOpts.map(n=>`<option value="${esc(n)}" ${u.nome_colaborador===n?'selected':''}>${esc(n)}</option>`)).join('');
-    const roleOpts=['admin','gestor','colaborador'].map(r=>`<option value="${r}" ${roleAtual===r?'selected':''}>${r==='admin'?'Admin':(r==='gestor'?'Gestor':'Colaborador')}</option>`).join('');
+    // Só super_admin pode conceder super_admin
+    const roleList=souSuperAdmin?['super_admin','admin','gestor','colaborador']:['admin','gestor','colaborador'];
+    const roleLabels={super_admin:'Super Admin',admin:'Admin',gestor:'Gestor',colaborador:'Colaborador'};
+    const roleOpts=roleList.map(r=>`<option value="${r}" ${roleAtual===r?'selected':''}>${roleLabels[r]}</option>`).join('');
+    // Checkboxes de permissões específicas
+    const permsAtuais=Array.isArray(u.permissoes)?u.permissoes:[];
+    const permsHtml=PERM_CATALOGO.map(p=>`<label style="display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:400;text-transform:none;letter-spacing:0;margin:0;padding:3px 8px;background:#fff;border:1px solid var(--line);border-radius:4px;cursor:pointer"><input type="checkbox" class="us-perm-${u.id}" data-perm="${p.k}" ${permsAtuais.includes(p.k)?'checked':''} ${ehAdminHard?'disabled':''} style="width:14px;height:14px;margin:0">${esc(p.l)}</label>`).join('');
     return`<div class="row-item" style="cursor:default;align-items:flex-start;flex-direction:column;gap:8px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;width:100%">
         <div style="flex:1;min-width:0">
@@ -8688,10 +8787,16 @@ function renderUs(){
         <span class="badge ${u.ativo?'b-uso':'b-desc'}">${u.ativo?'Ativo':'Inativo'}</span>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%;padding:8px 10px;background:#f7f5ee;border-radius:6px">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;margin:0">Permissão: <select id="us-role-${u.id}" style="width:auto;font-size:12px;padding:4px 8px" ${ehAdminHard?'disabled':''}>${roleOpts}</select></label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;margin:0">Nível: <select id="us-role-${u.id}" style="width:auto;font-size:12px;padding:4px 8px" ${ehAdminHard?'disabled':''}>${roleOpts}</select></label>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;text-transform:none;letter-spacing:0;margin:0;flex:1;min-width:200px">Colaborador: <select id="us-col-${u.id}" style="width:auto;flex:1;font-size:12px;padding:4px 8px">${colOpts}</select></label>
         <button class="btn-primary" onclick="salvarPermUs('${u.id}')" style="font-size:12px;padding:5px 12px" ${ehAdminHard?'disabled':''}>Salvar</button>
       </div>
+      <details style="width:100%" ${permsAtuais.length?'open':''}>
+        <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--ink-soft);padding:4px 0">🔑 Permissões específicas ${permsAtuais.length?`<span style="color:#175547">(${permsAtuais.length} ativa${permsAtuais.length>1?'s':''})</span>`:''}</summary>
+        <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:8px 0">
+          ${ehAdminHard?'<div style="font-size:12px;color:#5b1f6f;font-style:italic;padding:4px 8px">Super Admin tem acesso total — nenhuma permissão individual precisa ser marcada.</div>':permsHtml}
+        </div>
+      </details>
       <div class="item-actions" style="width:100%">
         <button class="btn-edit" onclick="resetSenhaUs('${esc(u.email).replace(/'/g,"\\'")}')">📧 Reset por email</button>
         <button class="btn-edit" onclick="trocarSenhaUs('${esc(u.email).replace(/'/g,"\\'")}')">🔑 Trocar aqui</button>
@@ -8700,15 +8805,32 @@ function renderUs(){
         ${ehAdminHard?'':`<button class="btn-del" onclick="excluirUs('${u.id}','${esc(u.email).replace(/'/g,"\\'")}')">Excluir</button>`}
       </div>
     </div>`;
-  }).join('')+'</div>';
+  }).join('')+'</div>':'';
+  $('us-lista').innerHTML=htmlPend+listaHtml;
 }
 async function salvarPermUs(id){
   const role=$('us-role-'+id).value;
   const nomeColab=$('us-col-'+id).value||null;
-  const{error}=await db.from('usuarios').update({role,nome_colaborador:nomeColab}).eq('id',id);
-  if(error){alert('Erro ao salvar: '+error.message+'\n\nSe o erro mencionar "role" ou "nome_colaborador", rode o SQL: adicionar_role_usuarios.sql');return;}
+  const perms=[...document.querySelectorAll('.us-perm-'+id+':checked')].map(cb=>cb.dataset.perm);
+  const{error}=await db.from('usuarios').update({role,nome_colaborador:nomeColab,permissoes:perms}).eq('id',id);
+  if(error){alert('Erro ao salvar: '+error.message+'\n\nSe o erro mencionar "role", "aprovado" ou "permissoes", rode o SQL: adicionar_aprovacao_e_permissoes.sql');return;}
   toast('✓ Permissão atualizada');
   openUs();
+}
+async function aprovarUs(id){
+  const u=usuarios.find(x=>x.id===id);if(!u)return;
+  if(!confirm(`Aprovar o usuário "${u.email}"?\n\nEle poderá entrar no sistema a partir de agora. Depois você pode ajustar o nível de permissão (Super Admin / Admin / Gestor / Colaborador).`))return;
+  const{error}=await db.from('usuarios').update({aprovado:true}).eq('id',id);
+  if(error){alert('Erro ao aprovar: '+error.message);return;}
+  toast('✓ Usuário aprovado — já pode entrar');
+  openUs();updatePendingBadges();
+}
+async function recusarUs(id,email){
+  if(!confirm(`Recusar e excluir o cadastro de "${email}"?\n\nO registro será removido da tabela. O usuário continuará existindo no Auth do Supabase mas não terá permissão de entrar.\n\nAção irreversível.`))return;
+  const{error}=await db.from('usuarios').delete().eq('id',id);
+  if(error){alert('Erro ao recusar: '+error.message);return;}
+  toast('✓ Cadastro recusado');
+  openUs();updatePendingBadges();
 }
 async function resetSenhaUs(email){
   if(!confirm(`Enviar e-mail de redefinição de senha para ${email}?\n\nO usuário vai receber um link no e-mail, clica nele e cria uma nova senha.`))return;
