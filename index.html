@@ -2366,7 +2366,7 @@ const SUPA_URL='https://jvfewdukhgmtdieufpaf.supabase.co';
 const SUPA_KEY='sb_publishable_O2rf2zCnJTZ1YE5q4eJeeA_AVdukzUg';
 const db=supabase.createClient(SUPA_URL,SUPA_KEY);
 // APP_VERSION: aparece no canto superior direito. Bump a cada deploy.
-const APP_VERSION='v123';
+const APP_VERSION='v124';
 document.addEventListener('DOMContentLoaded',()=>{
   const set=(id)=>{const el=document.getElementById(id);if(el)el.textContent=APP_VERSION;};
   set('app-version');set('version-fixed');
@@ -2407,11 +2407,19 @@ async function showApp(user){
   try{const{data}=await db.from('equipe').select('*').order('nome_completo');equipe=data||[];}catch(e){}
   // Carrega lista de usuarios cedo pra permitir checar role do banco
   try{const{data}=await db.from('usuarios').select('*');usuarios=data||[];}catch(e){}
-  // Se o usuário tem role=super_admin ou admin no banco, promove a admin (além dos hardcoded)
-  const uRec=(usuarios||[]).find(x=>(x.email||'').toLowerCase()===currentEmail.toLowerCase());
+  // Match case-insensitive pelo email do usuário logado
+  const emailAtual=(currentEmail||'').trim().toLowerCase();
+  let uRec=(usuarios||[]).find(x=>(x.email||'').trim().toLowerCase()===emailAtual);
+  // Fallback: busca direta no banco (caso a query acima não tenha trazido por RLS/filtro)
+  if(!uRec){
+    try{const r=await db.from('usuarios').select('*').ilike('email',emailAtual).maybeSingle();if(r.data)uRec=r.data;}catch(e){}
+  }
+  // Promove a admin se role=super_admin ou admin
   if(uRec&&(uRec.role==='super_admin'||uRec.role==='admin'))isAdminUser=true;
-  // "isRafael" (acesso Super Admin) = Rafael hardcoded OU qualquer usuário com role=super_admin no banco
-  const isRafael=currentEmail==='rafael.andrade.sa@gmail.com'||(uRec&&uRec.role==='super_admin');
+  // "isRafael" (acesso Super Admin) = Rafael hardcoded OU qualquer usuário com role=super_admin
+  const isRafael=emailAtual==='rafael.andrade.sa@gmail.com'||(uRec&&uRec.role==='super_admin');
+  // Debug visual: mostra o nível detectado no cabeçalho (ajuda a diagnosticar)
+  try{const roleLabel=emailAtual==='rafael.andrade.sa@gmail.com'?'Super Admin (hardcoded)':((uRec&&uRec.role)?('Nível: '+uRec.role):'Nível: não encontrado no banco');$('user-email').title=roleLabel;}catch(e){}
   setupPresence();
   $('nav').style.display='flex';
   // Admin geral (visível para os 3 admins): cadastros, relatórios, gestão de equipe/patrimônio, dashboards
